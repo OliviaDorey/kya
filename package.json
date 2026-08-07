@@ -1,0 +1,15 @@
+{
+  "name": "@kindred/kya",
+  "version": "0.1.0",
+  "description": "Know Your Agent — OpenID Federation leaf entity and Alberta credential adapter",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "verify:alberta": "node bin/verify-alberta.js",
+    "make:keys": "node bin/make-keys.js",
+    "make:entity-config": "node bin/make-entity-config.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": { "jose": "^6.0.0" }
+}
