@@ -297,36 +297,33 @@ libraries refuse. All of it is adapted to, none of it is adopted.
 
 ## 9. Licence, governance, and the gift
 
-### 9.1 The intent
+### 9.1 The gift
 
-Kindred's intent is that this specification and its reference implementation be
-**given away**, not held. A trust framework owned by one vendor is not a trust
-framework.
+This specification and its reference implementation are **given away, not held.**
+A trust framework owned by one vendor is not a trust framework. Decided by
+Olivia Dorey, 6 August 2026.
 
-**Mechanism matters more than intent, and "gift it to the citizens of Alberta" is
-not yet a mechanism.** IP cannot be assigned to the citizens of a province; there
-is no such legal person. The recommended construction, for Fasken to settle:
+| What | How | Status |
+|---|---|---|
+| Specification | **CC BY 4.0** | In force. `spec/LICENSE` |
+| Reference implementation | **Apache-2.0**, chosen over MIT for its express patent grant | In force. `LICENSE` |
+| Patents | **Irrevocable non-assertion covenant**, binding on successors and acquirers | In force. `PATENTS.md` |
+| Stewardship | Contributed to **DIACC** as a Pan-Canadian Trust Framework component, and to the **Digital Governance Council** while `CAN/DGSI 103-3` and `103-4` are open | To be initiated |
 
-1. **Specification** under **CC BY 4.0**, so anyone may implement, fork or
-   profile it, with attribution.
-2. **Reference implementation** under **Apache-2.0**, chosen over MIT for its
-   express patent grant, so no downstream implementer can be sued by an upstream
-   contributor.
-3. **Stewardship contributed** to DIACC as a Pan-Canadian Trust Framework
-   component and to the Digital Governance Council, whose `CAN/DGSI 103-3` and
-   `103-4` are open now. Once a standards body holds it, it is nobody's to
-   withdraw.
-4. **A non-assertion covenant** over any Kindred patent reading on it.
+Once a standards body holds the specification, it is nobody's to withdraw,
+including Kindred's. That is the point.
 
-**Note the scope question.** An open licence gifts this to everyone, Alberta
-included. Gifting it to Alberta *alone* would prevent Nova Scotia and New
-Brunswick from using it, which cuts directly against a national objective. The
-recommendation is to give it away generally and name Alberta as the first
-implementation partner.
+**Scope: given to everyone, not to Alberta.** An open licence gifts this to the
+whole country, Alberta included. Gifting it to Alberta alone would have stopped
+Nova Scotia and New Brunswick using it, which cuts against a Canada-by-2028
+objective. Alberta is named as the **first implementation partner**, which is
+both the more useful arrangement and the better account of it.
 
-**A corporate note:** Kindred is mid-incorporation. If this IP vests in the
-company, giving it away is a decision for the board and should be minuted, not
-assumed. Confirm assignment terms with John Spicer before publication.
+**Corporate condition, outstanding.** Kindred is mid-incorporation. If this IP
+vests in the company, giving it away is a board decision and must be minuted
+rather than assumed, and John Spicer's assignment terms need confirming before
+publication. The licences in this repository record the intent; the board
+resolution is what makes them safe.
 
 **What Kindred keeps, and why this is commercially coherent.** The standard is
 free. The Loom, the Trustmark, the assurance assessment and the Friends and
@@ -336,38 +333,28 @@ certifies nothing. Red Hat, not Oracle.
 
 ### 9.2 Time-bounding operated services
 
-Kindred's stated intent is that **services it hosts and operates be time-bound to
-expire on 31 December 2026**, so that no permanent dependency is created.
-
-The intent is right and should be preserved. The mechanism needs care in two
-places.
-
-**First, a hard expiry on revocation infrastructure is a safety problem, not a
-business one.** If people have delegated authority to agents and the revocation
-service goes dark on a date, either those delegations become unrevocable, or
-everything fails closed at once and people lose access to things they depend on.
-Neither is acceptable, and the second contradicts Failing Well directly: never
-extract after a bad outcome, and never abandon.
-
-**Second, 31 December 2026 is roughly five months away.** A pilot beginning after
-Agency in October would have about eight weeks of life. That is a demonstration
-with paperwork, not a pilot.
-
-**Recommended construction, preserving the intent:**
+Kindred creates **no permanent dependency**. Decided by Olivia Dorey, 6 August
+2026, in the following construction.
 
 | Commitment | Mechanism |
 |---|---|
-| No permanent dependency | The **co-development term** ends 31 December 2026 unless both parties renew. This is the date, applied to the engagement rather than the infrastructure. |
+| No permanent dependency | The **co-development term** ends **31 December 2026** unless both parties renew. The date binds the engagement, not the infrastructure. |
 | No lock-in | Alberta may take any operated service in-house **at any time, for any reason, at no cost**, with a committed handover package: source, runbooks, keys, data, and the agent skills. |
-| No cliff on safety-critical services | Revocation continues under a **wind-down obligation**: it runs until every delegation it covers has expired or been transferred, with a minimum ninety days' written notice. Availability is not conditional on a commercial relationship continuing. |
-| No hostage-taking | An **automatic release**: if Kindred ceases to operate a service, becomes insolvent, or is acquired, the handover package transfers automatically to Alberta under the open licences in §9.1. |
+| No cliff on safety-critical services | Revocation continues under a **wind-down obligation**: it runs until every delegation it covers has expired or been transferred, with a minimum of **ninety days' written notice**. Availability is not conditional on a commercial relationship continuing. |
+| No hostage-taking | **Automatic release**: if Kindred ceases to operate a service, becomes insolvent, or is acquired, the handover package transfers to Alberta automatically, under the open licences in §9.1. |
 
-That set delivers everything the fixed date was reaching for, and does not create
-the failure mode where the safety mechanism is the first thing to switch off.
+Why the date binds the term rather than the service. A hard expiry on revocation
+infrastructure is a safety problem, not a commercial one: if people have
+delegated authority to agents and the service stops on a date, either those
+delegations become unrevocable or everything fails closed at once and people
+lose access to things they depend on. The second contradicts Failing Well
+directly. The construction above delivers everything a fixed service expiry was
+reaching for, and binds Kindred in the cases a date does not cover, including
+acquisition.
 
-**Open for Olivia and Fasken.** Whether the December date binds the term, the
-exclusivity, or both. Whether the wind-down minimum is ninety days or longer.
-Whether the automatic release is a contractual right or a source escrow.
+**Outstanding for Fasken:** whether 31 December binds the term, the exclusivity,
+or both; and whether the automatic release is drafted as a contractual right or
+as source escrow.
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "@kindred/kya",
   "version": "0.1.0",
-  "description": "Know Your Agent — OpenID Federation leaf entity and Alberta credential adapter",
+  "description": "Know Your Agent \u2014 OpenID Federation leaf entity and Alberta credential adapter",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
@@ -9,7 +9,12 @@
     "make:keys": "node bin/make-keys.js",
     "make:entity-config": "node bin/make-entity-config.js"
   },
-  "license": "UNLICENSED",
-  "private": true,
-  "dependencies": { "jose": "^6.0.0" }
+  "license": "Apache-2.0",
+  "dependencies": {
+    "jose": "^6.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OliviaDorey/kya"
+  }
 }
