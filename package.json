@@ -1,10 +1,12 @@
 {
   "name": "@kindred/kya",
-  "version": "0.1.0",
-  "description": "Know Your Agent \u2014 OpenID Federation leaf entity and Alberta credential adapter",
+  "version": "1.0.0",
+  "description": "Know Your Agent \u2014 Agent Identity Card, Delegation Credential, and the Authoritative Rules Commitment",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "demo": "node bin/demo-delegation.js",
     "verify:alberta": "node bin/verify-alberta.js",
     "make:keys": "node bin/make-keys.js",
     "make:entity-config": "node bin/make-entity-config.js"
@@ -16,5 +18,13 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/OliviaDorey/kya"
-  }
+  },
+  "files": [
+    "src",
+    "bin",
+    "spec",
+    "LICENSE",
+    "PATENTS.md",
+    "README.md"
+  ]
 }

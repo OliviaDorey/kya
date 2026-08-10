@@ -1,0 +1,21 @@
+/**
+ * Know Your Agent.
+ *
+ * Reference implementation of spec/agent-identity-card-v0.1.md and
+ * spec/authoritative-rules-commitment.md. Apache-2.0, with an irrevocable
+ * patent non-assertion covenant in PATENTS.md. Implement it, fork it, ship it.
+ * Nobody needs to ask us.
+ */
+
+export * as sdjwt from './sdjwt.js';
+export * as aic from './aic.js';
+export * as adc from './adc.js';
+export * as status from './status.js';
+export * as determination from './determination.js';
+export * as federation from './federation.js';
+export * as alberta from './alberta.js';
+
+export { AIC_VCT } from './aic.js';
+export { ADC_VCT } from './adc.js';
+export { STATUS, inForce } from './status.js';
+export { TIER, KIND } from './determination.js';

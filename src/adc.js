@@ -1,0 +1,221 @@
+/**
+ * The Agent Delegation Credential.
+ *
+ * Section 6. Issued by the person's wallet to one specific agent, short-lived,
+ * and it answers the two questions a caseworker actually has: did this person
+ * authorise it, and what exactly did they authorise.
+ *
+ * Three properties are enforced here rather than described:
+ *
+ *   Attenuation only. A delegation may never grant an action the Agent Identity
+ *   Card does not already carry. Authority narrows going down a chain and never
+ *   widens, and a chain link that widens is rejected rather than clamped,
+ *   because silently clamping hides a bug in whoever built the chain.
+ *
+ *   The narrower of purpose and authorization_details governs. Where they
+ *   disagree, the verifier rejects. A human-authored purpose that promises less
+ *   than the machine-readable grant is the more dangerous direction, and it is
+ *   the one people actually read.
+ *
+ *   Short expiry is mandatory. Section 7 leans on it, because short expiry is
+ *   the only revocation mechanism that works when the status list cannot be
+ *   reached.
+ */
+
+import { issue as sdIssue, verify as sdVerify } from './sdjwt.js';
+
+export const ADC_VCT = 'https://agentcredential.ca/adc/v1';
+
+/** Hours or days, not months. Section 6. */
+export const MAX_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
+
+export const ACTIONS = ['read', 'draft', 'submit', 'appeal', 'monitor', 'correspond'];
+
+/** Which Agent Identity Card capability each action requires. */
+const ACTION_REQUIRES = {
+  read: 'read:program-information',
+  draft: 'draft:application',
+  submit: 'submit:application',
+  appeal: 'draft:appeal',
+  monitor: 'monitor:status',
+  correspond: 'correspond:on-behalf',
+};
+
+/**
+ * Actions a purpose sentence has to actually mention. The check is deliberately
+ * crude: it catches a grant that reaches further than the sentence the person
+ * read, and it does not pretend to understand the sentence.
+ */
+const PURPOSE_HINTS = {
+  submit: /\b(submit|apply|application|file|lodge)\b/i,
+  appeal: /\b(appeal|review|reconsider|challenge)\b/i,
+  correspond: /\b(correspond|write|contact|communicate|speak|reply)\b/i,
+};
+
+export function validate(adc, { aic, now = Date.now() } = {}) {
+  const problems = [];
+
+  if (adc.vct !== ADC_VCT) problems.push(`vct must be ${ADC_VCT}`);
+  if (!adc.iss) problems.push('iss is required and must be the person\'s wallet, not the agent operator');
+  if (!adc.exp) problems.push('exp is required');
+  if (!adc.iat) problems.push('iat is required');
+
+  if (adc.iat && adc.exp) {
+    const life = adc.exp - adc.iat;
+    if (life <= 0) problems.push('exp must be after iat');
+    if (life > MAX_LIFETIME_SECONDS) {
+      problems.push(
+        `lifetime of ${Math.round(life / 86400)} days exceeds the ${MAX_LIFETIME_SECONDS / 86400}-day maximum; ` +
+          'section 6 says hours or days, not months',
+      );
+    }
+  }
+
+  if (!adc.delegator?.sub) problems.push('delegator.sub is required');
+  if (adc.delegator?.sub && !adc.delegator.pairwise) {
+    // Section 6, and the privacy work item. A raw identifier reused across
+    // verifiers correlates the person across every service they touch.
+    problems.push('delegator.sub must be pairwise per verifier; set delegator.pairwise true to assert it');
+  }
+  if (!adc.delegator?.verified_by) problems.push('delegator.verified_by is required');
+
+  if (!adc.delegate?.agent_id) problems.push('delegate.agent_id is required');
+  if (!adc.delegate?.aic_thumbprint) problems.push('delegate.aic_thumbprint is required; a delegation binds to one card');
+  if (!adc.delegate?.cnf_thumbprint) problems.push('delegate.cnf_thumbprint is required; and to one key');
+
+  if (!adc.purpose || adc.purpose.trim().length < 10) {
+    problems.push('purpose is required, human-authored, and is what the person and the caseworker are shown');
+  }
+
+  if (!Array.isArray(adc.authorization_details) || adc.authorization_details.length === 0) {
+    problems.push('authorization_details must be a non-empty array');
+  } else {
+    adc.authorization_details.forEach((d, i) => {
+      if (!d.type) problems.push(`authorization_details[${i}].type is required`);
+      if (!Array.isArray(d.actions) || d.actions.length === 0) {
+        problems.push(`authorization_details[${i}].actions must be a non-empty array`);
+      } else {
+        const unknown = d.actions.filter((a) => !ACTIONS.includes(a));
+        if (unknown.length) problems.push(`authorization_details[${i}] has unknown actions: ${unknown.join(', ')}`);
+      }
+      if (!Array.isArray(d.programs) || d.programs.length === 0) {
+        problems.push(`authorization_details[${i}].programs must name at least one programme`);
+      }
+    });
+  }
+
+  if (!adc.consent?.record_uri) problems.push('consent.record_uri is required');
+  if (!adc.consent?.captured_at) problems.push('consent.captured_at is required');
+  if (!adc.consent?.language) problems.push('consent.language is required; it records what language they consented in');
+
+  if (!adc.revocation?.revoke_uri) problems.push('revocation.revoke_uri is required');
+  if (adc.revocation?.citizen_facing !== true) {
+    problems.push(
+      'revocation.citizen_facing must be true. Section 7 requires an endpoint reachable ' +
+        'without signing in to any government system.',
+    );
+  }
+
+  if (!adc.status?.status_list?.uri) problems.push('status.status_list.uri is required');
+
+  problems.push(...purposeDisagreements(adc));
+  if (aic) problems.push(...attenuationBreaches(adc, aic));
+
+  return { ok: problems.length === 0, problems };
+}
+
+/** The narrower governs. A grant that outruns the sentence the person read is rejected. */
+export function purposeDisagreements(adc) {
+  const out = [];
+  const purpose = adc.purpose ?? '';
+  const granted = new Set((adc.authorization_details ?? []).flatMap((d) => d.actions ?? []));
+
+  for (const [action, hint] of Object.entries(PURPOSE_HINTS)) {
+    if (granted.has(action) && !hint.test(purpose)) {
+      out.push(
+        `authorization_details grants "${action}" but the purpose sentence never mentions it. ` +
+          'The narrower governs, so this is rejected rather than trimmed.',
+      );
+    }
+  }
+  return out;
+}
+
+/** Authority narrows going down. Anything else is a bug in whoever built the chain. */
+export function attenuationBreaches(adc, aic) {
+  const out = [];
+  const held = new Set(aic.capabilities ?? []);
+
+  for (const d of adc.authorization_details ?? []) {
+    for (const action of d.actions ?? []) {
+      const needed = ACTION_REQUIRES[action];
+      if (needed && !held.has(needed)) {
+        out.push(
+          `delegation grants "${action}" but the Agent Identity Card does not carry "${needed}". ` +
+            'A delegation may only narrow what the card already holds.',
+        );
+      }
+    }
+  }
+
+  if (adc.delegate?.agent_id && aic.agent?.id && adc.delegate.agent_id !== aic.agent.id) {
+    out.push(`delegation names agent ${adc.delegate.agent_id} but the card is for ${aic.agent.id}`);
+  }
+
+  // A card that says it never acts without approval must be delegated the same way.
+  if (aic.conduct?.acts_without_approval === false) {
+    for (const d of adc.authorization_details ?? []) {
+      const needs = new Set(d.constraints?.requires_human_approval ?? []);
+      for (const action of d.actions ?? []) {
+        if (['submit', 'appeal'].includes(action) && !needs.has(action)) {
+          out.push(
+            `the card states it never acts without approval, so "${action}" must appear in ` +
+              'constraints.requires_human_approval',
+          );
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+export async function issue({ adc, aic, walletKey, holderJwk, kid, alg = 'ES256', selective = [] }) {
+  const { ok, problems } = validate(adc, { aic });
+  if (!ok) throw new Error(`Agent Delegation Credential is not conforming:\n  - ${problems.join('\n  - ')}`);
+  return sdIssue({ payload: adc, selective, privateKey: walletKey, holderJwk, kid, alg });
+}
+
+export async function verify(presented, { walletKey, aic, audience, nonce, now = Date.now() }) {
+  // The issuer of a delegation is the person's wallet, so the "issuer key" here
+  // is the wallet's key. Naming it walletKey at the boundary keeps callers from
+  // reaching for the agent operator's key by habit.
+  const result = await sdVerify(presented, { issuerKey: walletKey, audience, nonce, requireKeyBinding: true, now });
+  const adc = result.claims;
+
+  if (adc.vct !== ADC_VCT) throw new Error(`not an Agent Delegation Credential: vct is ${adc.vct}`);
+
+  const { ok, problems } = validate(adc, { aic, now });
+  if (!ok) throw new Error(`presented delegation is not conforming:\n  - ${problems.join('\n  - ')}`);
+
+  return { ...result, adc };
+}
+
+/**
+ * What the caseworker is shown. Plain sentences, because a delegation nobody
+ * reads is a delegation nobody consented to.
+ */
+export function explain(adc) {
+  const actions = [...new Set((adc.authorization_details ?? []).flatMap((d) => d.actions ?? []))];
+  const approval = [
+    ...new Set((adc.authorization_details ?? []).flatMap((d) => d.constraints?.requires_human_approval ?? [])),
+  ];
+  const lines = [
+    `Purpose, in their words: ${adc.purpose}`,
+    `The agent may: ${actions.join(', ')}`,
+  ];
+  if (approval.length) lines.push(`It must come back for approval before it can: ${approval.join(', ')}`);
+  lines.push(`This authority ends: ${new Date(adc.exp * 1000).toISOString()}`);
+  lines.push(`They can withdraw it at any time here: ${adc.revocation?.revoke_uri}`);
+  return lines.join('\n');
+}
