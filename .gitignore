@@ -3,3 +3,4 @@ keys/
 *.log
 entity-configuration.jwt
 entity-configuration.json
+demo/node_modules/

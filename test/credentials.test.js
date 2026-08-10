@@ -16,6 +16,7 @@ import * as adc from '../src/adc.js';
 import * as status from '../src/status.js';
 import * as determination from '../src/determination.js';
 import * as capability from '../src/capability.js';
+import * as revocation from '../src/revocation.js';
 
 const issuer = await generateKeyPair('ES256', { extractable: true });
 const wallet = await generateKeyPair('ES256', { extractable: true });
@@ -441,4 +442,105 @@ test('the screen catches every sensitive category it claims to', () => {
     assert.ok(hits.some((h) => h.category === expected), `"${text}" should be ${expected}`);
   }
   assert.deepEqual(capability.screen('submit a form and track its status'), []);
+});
+
+// ───────────────────────────────────────────────────── Revocation service
+
+test('a revocation request must be signed by the key that granted the delegation', async () => {
+  const { SignJWT } = await import('jose');
+  const reg = new revocation.RevocationRegister({
+    list: new status.StatusList({ size: 100 }),
+    listUri: 'https://status.agentcredential.ca/adc',
+  });
+  const walletJwk = await exportJWK(wallet.publicKey);
+  reg.register({ credentialId: 'c1', idx: 3, delegatorJwk: walletJwk, expiresAt: sec + 3600 });
+
+  const good = await new SignJWT({ action: 'revoke', credential: 'c1' })
+    .setProtectedHeader({ alg: 'ES256' }).setIssuedAt().sign(wallet.privateKey);
+  assert.equal((await revocation.verifyRevocationRequest(good, { delegatorJwk: walletJwk, credentialId: 'c1' })).ok, true);
+
+  // Somebody else's key.
+  const impostor = await new SignJWT({ action: 'revoke', credential: 'c1' })
+    .setProtectedHeader({ alg: 'ES256' }).setIssuedAt().sign(other.privateKey);
+  const bad = await revocation.verifyRevocationRequest(impostor, { delegatorJwk: walletJwk, credentialId: 'c1' });
+  assert.equal(bad.ok, false);
+  assert.match(bad.reason, /not signed by the key/);
+
+  // Right key, wrong credential.
+  const wrongCred = await revocation.verifyRevocationRequest(good, { delegatorJwk: walletJwk, credentialId: 'c2' });
+  assert.equal(wrongCred.ok, false);
+  assert.match(wrongCred.reason, /different delegation/);
+});
+
+test('an old signed revocation request cannot be replayed later', async () => {
+  const { SignJWT } = await import('jose');
+  const walletJwk = await exportJWK(wallet.publicKey);
+  const stale = await new SignJWT({ action: 'revoke', credential: 'c1', iat: sec - 3600 })
+    .setProtectedHeader({ alg: 'ES256' }).sign(wallet.privateKey);
+  const r = await revocation.verifyRevocationRequest(stale, { delegatorJwk: walletJwk, credentialId: 'c1' });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /five minutes old/);
+});
+
+test('revoking updates the status list, tells every verifier, and returns a receipt', async () => {
+  const list = new status.StatusList({ size: 100 });
+  const reg = new revocation.RevocationRegister({ list, listUri: 'https://status.agentcredential.ca/adc' });
+  reg.register({ credentialId: 'c1', idx: 7, delegatorJwk: {}, purposeCommitment: 'abc', expiresAt: sec + 3600 });
+  reg.notePresentation('c1', 'https://a.ca', sec);
+  reg.notePresentation('c1', 'https://b.ca', sec);
+
+  const told = [];
+  const r = await revocation.revoke(reg, { credentialId: 'c1', notify: async ({ verifier }) => told.push(verifier) });
+
+  assert.equal(r.ok, true);
+  assert.equal(list.get(7), status.STATUS.INVALID);
+  assert.deepEqual(told.sort(), ['https://a.ca', 'https://b.ca']);
+  assert.equal(r.receipt.notified_count, 2);
+  assert.equal(r.receipt.revoked.purpose, null, 'her sentence is not ours to put in a receipt');
+  assert.match(revocation.explainReceipt(r.receipt), /can no longer act for you/);
+});
+
+test('one unreachable verifier does not stop the others being told', async () => {
+  const reg = new revocation.RevocationRegister({
+    list: new status.StatusList({ size: 100 }),
+    listUri: 'https://status.agentcredential.ca/adc',
+  });
+  reg.register({ credentialId: 'c1', idx: 1, delegatorJwk: {}, expiresAt: sec + 3600 });
+  reg.notePresentation('c1', 'https://down.ca', sec);
+  reg.notePresentation('c1', 'https://up.ca', sec);
+
+  const r = await revocation.revoke(reg, {
+    credentialId: 'c1',
+    notify: async ({ verifier }) => {
+      if (verifier === 'https://down.ca') throw new Error('connection refused');
+    },
+  });
+
+  assert.deepEqual(r.notified, ['https://up.ca']);
+  assert.equal(r.failed.length, 1);
+  assert.match(r.receipt.note, /could not be reached/);
+  assert.match(revocation.explainReceipt(r.receipt), /required to treat it as not in force/);
+});
+
+test('pressing revoke twice is not an error', async () => {
+  const reg = new revocation.RevocationRegister({
+    list: new status.StatusList({ size: 100 }),
+    listUri: 'https://status.agentcredential.ca/adc',
+  });
+  reg.register({ credentialId: 'c1', idx: 1, delegatorJwk: {}, expiresAt: sec + 3600 });
+  await revocation.revoke(reg, { credentialId: 'c1', notify: async () => {} });
+  const again = await revocation.revoke(reg, { credentialId: 'c1', notify: async () => {} });
+  assert.equal(again.ok, true);
+  assert.equal(again.alreadyRevoked, true);
+});
+
+test('a freshness window nobody could rely on is refused', () => {
+  assert.throws(
+    () => new revocation.RevocationRegister({
+      list: new status.StatusList({ size: 10 }),
+      listUri: 'u',
+      freshnessSeconds: 48 * 60 * 60,
+    }),
+    /exceeds the 24 hour maximum/,
+  );
 });

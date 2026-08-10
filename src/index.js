@@ -13,6 +13,7 @@ export * as adc from './adc.js';
 export * as status from './status.js';
 export * as determination from './determination.js';
 export * as capability from './capability.js';
+export * as revocation from './revocation.js';
 export * as federation from './federation.js';
 export * as alberta from './alberta.js';
 

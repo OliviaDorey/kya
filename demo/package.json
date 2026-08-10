@@ -1,0 +1,17 @@
+{
+  "name": "@kindred/kya-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The Agency 2026 demonstration harness: caseworker screen, citizen revocation, status list, and the honest slide",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "express": "^5.0.0",
+    "jose": "^6.0.0"
+  }
+}
