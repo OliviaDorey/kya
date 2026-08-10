@@ -1,7 +1,7 @@
 /**
  * Know Your Agent.
  *
- * Reference implementation of spec/agent-identity-card-v0.1.md and
+ * Reference implementation of spec/agent-identity-card-v0.2.md and
  * spec/authoritative-rules-commitment.md. Apache-2.0, with an irrevocable
  * patent non-assertion covenant in PATENTS.md. Implement it, fork it, ship it.
  * Nobody needs to ask us.

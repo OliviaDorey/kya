@@ -1,4 +1,6 @@
 # The Agent Identity Card and the Delegation Credential
+
+**Version 0.2 — 10 August 2026.** Supersedes v0.1 of 6 August 2026.
 **Version 0.1, draft for review. 6 August 2026.**
 
 Editor: Olivia Dorey, The Kindred Agency, Bridgewater, Nova Scotia.
@@ -193,18 +195,28 @@ questions 2 and 3.
     "cnf_thumbprint": "…"                       // and to the key that will present it
   },
 
-  "purpose": "Apply for the Alberta Disability Assistance Program on my behalf, and appeal if I am refused.",
+  "purpose_commitment": "K7dM…",                // SHA-256 over salt:purpose, §6.1
+  "purpose": "Apply for Assured Income for the Severely Handicapped on my
+              behalf, and appeal if I am refused.",
+                                                // SELECTIVELY DISCLOSABLE and
+                                                // WITHHELD BY DEFAULT. Hers.
 
   "authorization_details": [                    // RFC 9396 shape
     {
-      "type": "gc_benefit_application",
-      "programs": ["urn:ab:program:adap"],
-      "actions": ["read", "draft", "submit", "appeal"],
+      "type": "ca_public_service_request",
+      "capability": "submit:form",              // §6.1. Public, subject-free
+      "actions": ["draft", "submit"],
       "constraints": {
         "max_submissions": 1,
-        "requires_human_approval": ["submit", "appeal"],
+        "requires_human_approval": ["submit"],
         "valid_until": "2026-09-30"
       }
+    },
+    {
+      "type": "ca_public_service_request",
+      "capability": "request:review",
+      "actions": ["appeal"],
+      "constraints": { "requires_human_approval": ["appeal"] }
     }
   ],
 
@@ -225,20 +237,24 @@ questions 2 and 3.
 }
 ```
 
-**Notes on three deliberate choices.**
+**Notes on four deliberate choices.**
 
 `delegator.sub` is pairwise. A person delegating to one agent across three
 programs must not be correlatable across those three verifiers by the identifier
 alone.
 
-`purpose` is normative and human-authored. It is what the person is shown at the
-moment of granting and what a caseworker is shown at the moment of receiving. If
-it and `authorization_details` disagree, the narrower governs and the verifier
-should reject.
+`capability` is what the verifier reads, and it comes from a closed vocabulary
+that describes the *shape* of an interaction and never its subject. `purpose` is
+the person's own sentence, and it is withheld by default. See §6.1, which is the
+part of this specification that changed most between v0.1 and v0.2.
+
+`purpose` and `capability` must agree, and where they disagree **the narrower
+governs and the verifier rejects**. Rejects, not trims: silently clamping hides a
+bug in whoever built the chain.
 
 `requires_human_approval` lists the actions the agent may prepare but not
-complete. This is where Kindred's approval architecture becomes cryptographic
-rather than a promise in an interface.
+complete. This is where an approval architecture becomes cryptographic rather
+than a promise in an interface.
 
 **Chaining.** Where a delegation must pass through an intermediary, for example a
 navigator acting with a client, chain per Delegate SD-JWT and mirror the chain in
@@ -246,6 +262,55 @@ the RFC 8693 `act` claim at runtime so downstream services see the full path.
 Until that draft stabilises, use an explicit `delegation_chain` array of
 thumbprints. Both approaches are transitional and the claim set does not depend
 on which wins.
+
+---
+
+### 6.1 Capability scoping, and why the programme is not named
+
+**A verifier already knows who it is.** When an agent presents to the office that
+administers a programme, naming that programme in the credential tells that
+office nothing it did not already know. What it does is tell every other party
+that handles the credential — intermediaries, logs, status infrastructure, anyone
+who later obtains a copy — something about the person that they had no need for.
+
+So a delegation carries two things where v0.1 carried one.
+
+**`capability`** is public and comes from a closed vocabulary. Every entry
+describes the shape of an interaction. None describes a subject, a programme, a
+condition, or a circumstance.
+
+| Capability | What the verifier is shown |
+|---|---|
+| `read:public-information` | Look up publicly published information |
+| `submit:form` | Submit a form and track its status |
+| `provide:documents` | Provide documents that were asked for |
+| `track:status` | Check where something has got to |
+| `request:review` | Ask for a decision to be looked at again |
+| `correspond:administrative` | Exchange routine correspondence about a file |
+
+**`purpose`** is the person's own sentence, in their own language. It is what
+they read at the moment of granting. It is selectively disclosable and **withheld
+by default**, and `purpose_commitment` — a salted SHA-256 over `salt:purpose` —
+travels in the clear so that a verifier who is shown the sentence can prove it is
+the one that was consented to.
+
+The person loses nothing: the sentence lives in their wallet and they hold the
+salt. The verifier loses nothing it needs.
+
+**Conforming implementations must:**
+
+- reject a delegation whose `authorization_details` name a programme in the clear
+- reject a delegation carrying a `capability` outside the vocabulary
+- reject actions beyond what the stated capability permits
+- **withhold `purpose` by default** when presenting, requiring an explicit
+  decision by the person to disclose it
+- screen every publicly readable field for terms disclosing health,
+  reproductive, immigration, housing, income, safety, family or justice
+  circumstances, and treat a hit as an error
+
+That last requirement is deliberately blunt and deliberately over-broad. A false
+positive costs an implementer a rewrite. A false negative costs somebody their
+privacy at a counter.
 
 ---
 
@@ -386,3 +451,34 @@ Digital Governance Council) on the trust and assurance model; **John Spicer**
 framework; and the DIF Trusted AI Agents working group on overlap with KYA-OS.
 
 Comments to `trust@thekindredagency.com`.
+
+---
+
+## Changelog
+
+### v0.2 — 10 August 2026
+
+Everything here came out of writing the threat model rather than out of review
+comments, which is the intended order.
+
+- **§6.1 is new: capability scoping.** A delegation now carries a public
+  `capability` from a closed, subject-free vocabulary, and the person's own
+  `purpose` is withheld by default with a salted commitment in the clear.
+  Naming a programme in `authorization_details` is now non-conforming.
+- **§7 gained the service half.** Revocation was specified as an obligation and
+  is now also implemented: proof of control of the delegating key and nothing
+  else, status list updated before any notification, best-effort notice that
+  does not stop at the first failure, a receipt, and a freshness window capped
+  at 24 hours.
+- **Conformance is now testable.** The reference implementation refuses rather
+  than warns on every rule marked *must* in this document.
+
+**Migration from v0.1.** A v0.1 delegation is not conforming under v0.2, because
+it names a programme in the clear and presents `purpose` to the verifier. There
+is no compatibility shim on purpose: v0.1 was published four days ago, has no
+deployments, and a shim would preserve the exact behaviour §6.1 exists to
+prevent.
+
+### v0.1 — 6 August 2026
+
+First publication.

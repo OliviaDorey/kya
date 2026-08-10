@@ -2,7 +2,7 @@
  * SD-JWT VC, the subset this specification needs.
  *
  * Enough of RFC 9901 and SD-JWT VC to issue, present, and verify the two
- * credentials in spec/agent-identity-card-v0.1.md. Not a general SD-JWT
+ * credentials in spec/agent-identity-card-v0.2.md. Not a general SD-JWT
  * library, and deliberately not trying to be one: a smaller surface is a
  * smaller thing to get wrong, and the parts we skipped are listed at the
  * bottom of this file rather than left for someone to discover.

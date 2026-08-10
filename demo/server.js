@@ -24,6 +24,28 @@ import { boot, world, signWithdrawal, presentTo } from './state.js';
 import * as views from './views.js';
 
 const app = express();
+
+/**
+ * Headers, even on a demonstration.
+ *
+ * Not because this is exposed, but because a government identity team will open
+ * developer tools during the demo, and a page served without them says something
+ * about how we build that no slide can undo. There is no external script, style,
+ * font or image anywhere in this app, so the policy can be as tight as it reads.
+ */
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=(), interest-cohort=()');
+  res.setHeader('Cache-Control', 'no-store');
+  res.removeHeader('X-Powered-By');
+  next();
+});
+
+app.disable('x-powered-by');
 app.use(express.urlencoded({ extended: false }));
 const PORT = process.env.PORT || 4173;
 const VERIFIER = process.env.VERIFIER_ID || 'https://caseworker.alberta.ca';
@@ -170,8 +192,14 @@ app.post('/reset', async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  // Stack traces go to the operator's console, never to the page. On a stage in
+  // front of a Minister, a wall of internals is the worst possible failure mode
+  // and the one most likely to be photographed.
   console.error(err);
-  res.status(500).send(`<pre>${err.stack}</pre>`);
+  res.status(500).send(
+    '<p style="font:17px/1.5 Georgia,serif;padding:2rem">Something went wrong. ' +
+    'The detail is in the server log.</p>',
+  );
 });
 
 app.listen(PORT, () => {
