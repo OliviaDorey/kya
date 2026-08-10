@@ -12,7 +12,7 @@ than we did.
 
 ```bash
 npm install
-npm test              # 27 tests, each named after the promise it defends
+npm test              # 35 tests, each named after the promise it defends
 npm run demo          # end to end, no network
 npm run verify:alberta   # talks to Alberta's live trust anchor
 ```
@@ -106,6 +106,15 @@ sentence promises less than `authorization_details` grants, the narrower governs
 and the credential is rejected. Rejected, not trimmed: silently clamping hides a
 bug in whoever built the chain.
 
+**The sensitive noun never reaches a field a clerk can read.** A delegation
+carries a `capability` from a closed, subject-free vocabulary ("submit a form and
+track its status"), and the person's own sentence is committed to and withheld by
+default. Every publicly readable field is screened against eight categories of
+sensitive term, and a hit is an error rather than a warning. `adc.present()`
+withholds the purpose unless the person explicitly chooses to show it, because a
+privacy property that depends on the caller remembering an argument is not a
+property.
+
 **An inference cannot wear the clothes of a decision.** Every determination
 carries a `rule_basis` naming its tier. A tier 3 determination, meaning an answer
 where no authoritative rule is published, is a malformed credential. See
@@ -123,6 +132,7 @@ rule cannot drift between callers.
 | `src/sdjwt.js` | SD-JWT VC: disclosures, digests, key binding. The subset these credentials need; the gaps are listed at the bottom of the file |
 | `src/aic.js` | Agent Identity Card. What the agent is, and who is accountable |
 | `src/adc.js` | Agent Delegation Credential. What the person authorised, and for how long |
+| `src/capability.js` | Capability scoping. The public vocabulary, the sensitive-term screen, and purpose commitments |
 | `src/status.js` | Token Status List, the fail-closed rule, and the revocation receipt |
 | `src/determination.js` | `rule_basis`. Call the rule, cite the provision, or navigate only |
 | `src/federation.js` | OpenID Federation 1.0, leaf subset. Anchor fetch, statement verification, chain validation |

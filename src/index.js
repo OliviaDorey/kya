@@ -12,6 +12,7 @@ export * as aic from './aic.js';
 export * as adc from './adc.js';
 export * as status from './status.js';
 export * as determination from './determination.js';
+export * as capability from './capability.js';
 export * as federation from './federation.js';
 export * as alberta from './alberta.js';
 
@@ -19,3 +20,4 @@ export { AIC_VCT } from './aic.js';
 export { ADC_VCT } from './adc.js';
 export { STATUS, inForce } from './status.js';
 export { TIER, KIND } from './determination.js';
+export { CAPABILITIES } from './capability.js';

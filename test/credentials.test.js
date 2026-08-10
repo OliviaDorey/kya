@@ -15,6 +15,7 @@ import * as aic from '../src/aic.js';
 import * as adc from '../src/adc.js';
 import * as status from '../src/status.js';
 import * as determination from '../src/determination.js';
+import * as capability from '../src/capability.js';
 
 const issuer = await generateKeyPair('ES256', { extractable: true });
 const wallet = await generateKeyPair('ES256', { extractable: true });
@@ -46,13 +47,20 @@ const baseDelegation = (over = {}) => ({
   exp: sec + 7 * 86400,
   delegator: { sub: 'pw:abc', pairwise: true, verified_by: 'https://account.alberta.ca/dts', assurance: 'substantial' },
   delegate: { agent_id: AGENT_ID, aic_thumbprint: 'x', cnf_thumbprint: 'y' },
-  purpose: 'Apply for the Alberta Disability Assistance Program on my behalf, and appeal if I am refused.',
+  purpose: 'Apply for the Alberta Assured Income for the Severely Handicapped on my behalf, and appeal if I am refused.',
+  purpose_commitment: capability.commitPurpose('x').commitment,
   authorization_details: [
     {
-      type: 'gc_benefit_application',
-      programs: ['urn:ab:program:adap'],
-      actions: ['read', 'draft', 'submit', 'appeal'],
-      constraints: { requires_human_approval: ['submit', 'appeal'] },
+      type: 'ca_public_service_request',
+      capability: 'submit:form',
+      actions: ['draft', 'submit'],
+      constraints: { requires_human_approval: ['submit'] },
+    },
+    {
+      type: 'ca_public_service_request',
+      capability: 'request:review',
+      actions: ['appeal'],
+      constraints: { requires_human_approval: ['appeal'] },
     },
   ],
   consent: { record_uri: 'https://wallet.example.ca/c/1', captured_at: new Date().toISOString(), language: 'en-CA', method: 'in-app-explicit' },
@@ -165,7 +173,8 @@ test('a delegation may never grant more than the card holds', () => {
   const wider = baseDelegation({
     purpose: 'Apply on my behalf, appeal if refused, and write to them for me.',
     authorization_details: [
-      { type: 'x', programs: ['p'], actions: ['read', 'submit', 'correspond'], constraints: { requires_human_approval: ['submit'] } },
+      { type: 'x', capability: 'correspond:administrative', actions: ['correspond'], constraints: {} },
+      { type: 'x', capability: 'submit:form', actions: ['draft', 'submit'], constraints: { requires_human_approval: ['submit'] } },
     ],
   });
   const { ok, problems } = adc.validate(wider, { aic: card });
@@ -183,7 +192,7 @@ test('the narrower of the purpose sentence and the grant governs', () => {
 
 test('a card that never acts without approval forces approval into the delegation', () => {
   const noApproval = baseDelegation({
-    authorization_details: [{ type: 'x', programs: ['p'], actions: ['read', 'submit'], constraints: {} }],
+    authorization_details: [{ type: 'x', capability: 'submit:form', actions: ['draft', 'submit'], constraints: {} }],
   });
   const { problems } = adc.validate(noApproval, { aic: baseCard() });
   assert.ok(problems.some((p) => p.includes('requires_human_approval')));
@@ -218,21 +227,30 @@ test('a delegation naming a different agent than the card is refused', () => {
 });
 
 test('a conforming delegation round-trips through issue and verify', async () => {
-  const issued = await adc.issue({
-    adc: baseDelegation(),
+  const { credential, salt } = await adc.issue({
+    adc: { ...baseDelegation(), purpose_commitment: undefined },
     aic: baseCard(),
     walletKey: wallet.privateKey,
     holderJwk: agentJwk,
   });
-  const presented = await sdjwt.present(issued, { audience: 'https://v.ca', nonce: 'n', holderKey: agent.privateKey });
+  const presented = await adc.present(credential, { audience: 'https://v.ca', nonce: 'n', holderKey: agent.privateKey });
   const { adc: got } = await adc.verify(presented, {
     walletKey: wallet.publicKey,
     aic: baseCard(),
     audience: 'https://v.ca',
     nonce: 'n',
   });
-  assert.equal(got.purpose, baseDelegation().purpose);
-  assert.match(adc.explain(got), /must come back for approval/);
+
+  // The verifier gets the shape and not the sentence.
+  assert.equal(got.purpose, undefined, 'the purpose must not reach the verifier by default');
+  assert.ok(got.purpose_commitment, 'but the commitment must, so consent is provable');
+  assert.ok(salt, 'and the person keeps the salt');
+  assert.ok(capability.verifyPurpose(baseDelegation().purpose, salt, got.purpose_commitment));
+
+  const shown = capability.explainToVerifier(got);
+  assert.match(shown, /Submit a form and track its status/);
+  assert.doesNotMatch(shown, /Handicapped|Assured Income/i);
+  assert.match(shown, /withheld from you by design/);
 });
 
 // ───────────────────────────────────────────────────── Status
@@ -322,4 +340,105 @@ test('a tier 1 service going dark produces a sentence, not silence', () => {
   assert.match(d.tell_the_person, /could not reach/);
   assert.equal(d.logged.from, 1);
   assert.equal(d.logged.to, 3);
+});
+
+// ───────────────────────────────────────────────────── Capability scoping
+
+test('the sensitive noun cannot reach a field a clerk can read', () => {
+  const leaky = baseDelegation({
+    authorization_details: [
+      { type: 'aish_application', capability: 'submit:form', actions: ['draft', 'submit'], constraints: { requires_human_approval: ['submit'] } },
+    ],
+  });
+  const { ok, problems } = adc.validate(leaky, { aic: baseCard() });
+  assert.equal(ok, false);
+  assert.ok(problems.some((p) => p.includes('aish') && p.includes('health information')));
+});
+
+test('naming the programme in the clear is refused', () => {
+  const named = baseDelegation();
+  named.authorization_details[0].programs = ['urn:ab:program:generic'];
+  const { problems } = adc.validate(named, { aic: baseCard() });
+  assert.ok(problems.some((p) => p.includes('already knows which office')));
+});
+
+test('a capability cannot be stretched past the actions it permits', () => {
+  const stretched = baseDelegation({
+    authorization_details: [
+      { type: 'x', capability: 'track:status', actions: ['monitor', 'submit'], constraints: {} },
+    ],
+  });
+  const { problems } = adc.validate(stretched, { aic: baseCard() });
+  assert.ok(problems.some((p) => p.includes('only permits')));
+});
+
+test('an unknown capability is a typo, not a feature', () => {
+  const odd = baseDelegation({
+    authorization_details: [{ type: 'x', capability: 'do:anything', actions: ['submit'], constraints: {} }],
+  });
+  const { problems } = adc.validate(odd, { aic: baseCard() });
+  assert.ok(problems.some((p) => p.includes('not in the vocabulary')));
+});
+
+test('issuing with the purpose in the clear is refused outright', async () => {
+  await assert.rejects(
+    () => adc.issue({
+      adc: { ...baseDelegation(), purpose_commitment: undefined },
+      aic: baseCard(),
+      walletKey: wallet.privateKey,
+      holderJwk: agentJwk,
+      selective: [],
+    }),
+    /refusing to issue a delegation with the purpose in the clear/,
+  );
+});
+
+test('presenting withholds the purpose unless the person chooses to show it', async () => {
+  const { credential, salt } = await adc.issue({
+    adc: { ...baseDelegation(), purpose_commitment: undefined },
+    aic: baseCard(),
+    walletKey: wallet.privateKey,
+    holderJwk: agentJwk,
+  });
+
+  const quiet = await adc.present(credential, { audience: 'https://v.ca', nonce: 'n', holderKey: agent.privateKey });
+  const shown = await adc.present(credential, { audience: 'https://v.ca', nonce: 'n', holderKey: agent.privateKey, disclosePurpose: true });
+
+  const a = await sdjwt.verify(quiet, { issuerKey: wallet.publicKey, audience: 'https://v.ca', nonce: 'n' });
+  const b = await sdjwt.verify(shown, { issuerKey: wallet.publicKey, audience: 'https://v.ca', nonce: 'n' });
+
+  assert.equal(a.claims.purpose, undefined);
+  assert.equal(b.claims.purpose, baseDelegation().purpose);
+  // Both carry the commitment, so the verifier always knows a purpose exists.
+  assert.equal(a.claims.purpose_commitment, b.claims.purpose_commitment);
+  assert.ok(capability.verifyPurpose(b.claims.purpose, salt, b.claims.purpose_commitment));
+});
+
+test('a substituted purpose does not match the commitment', async () => {
+  const { salt, purpose_commitment } = await adc.issue({
+    adc: { ...baseDelegation(), purpose_commitment: undefined },
+    aic: baseCard(),
+    walletKey: wallet.privateKey,
+    holderJwk: agentJwk,
+  });
+  assert.equal(capability.verifyPurpose('Something else entirely, honest.', salt, purpose_commitment), false);
+});
+
+test('the screen catches every sensitive category it claims to', () => {
+  const samples = {
+    health: 'aish_application',
+    status: 'refugee claim',
+    housing: 'eviction notice',
+    safety: 'domestic violence support',
+    family: 'custody matter',
+    justice: 'parole check-in',
+    income: 'social assistance file',
+    reproductive: 'maternity leave',
+  };
+  for (const [expected, text] of Object.entries(samples)) {
+    const hits = capability.screen(text);
+    assert.ok(hits.length, `"${text}" should be caught`);
+    assert.ok(hits.some((h) => h.category === expected), `"${text}" should be ${expected}`);
+  }
+  assert.deepEqual(capability.screen('submit a form and track its status'), []);
 });

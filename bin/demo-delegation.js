@@ -17,6 +17,7 @@ import * as aic from '../src/aic.js';
 import * as adc from '../src/adc.js';
 import * as status from '../src/status.js';
 import * as determination from '../src/determination.js';
+import * as capability from '../src/capability.js';
 
 const say = (s = '') => console.log(s);
 const rule = (t) => say(`\n${'─'.repeat(74)}\n${t}\n${'─'.repeat(74)}`);
@@ -104,18 +105,22 @@ const delegation = {
     assurance: 'substantial',
   },
   delegate: { agent_id: AGENT_ID, aic_thumbprint: cardThumb, cnf_thumbprint: agentKeyThumb },
+  // Her sentence, in her words. It names what she is going through, and it
+  // never leaves her wallet unless she chooses to show it.
   purpose:
-    'Apply for the Alberta Disability Assistance Program on my behalf, and appeal if I am refused.',
+    'Apply for Assured Income for the Severely Handicapped on my behalf, and appeal if I am refused.',
   authorization_details: [
     {
-      type: 'gc_benefit_application',
-      programs: ['urn:ab:program:adap'],
-      actions: ['read', 'draft', 'submit', 'appeal'],
-      constraints: {
-        max_submissions: 1,
-        requires_human_approval: ['submit', 'appeal'],
-        valid_until: '2026-09-30',
-      },
+      type: 'ca_public_service_request',
+      capability: 'submit:form',
+      actions: ['draft', 'submit'],
+      constraints: { max_submissions: 1, requires_human_approval: ['submit'], valid_until: '2026-09-30' },
+    },
+    {
+      type: 'ca_public_service_request',
+      capability: 'request:review',
+      actions: ['appeal'],
+      constraints: { requires_human_approval: ['appeal'], valid_until: '2026-09-30' },
     },
   ],
   consent: {
@@ -128,7 +133,7 @@ const delegation = {
   status: { status_list: { uri: ADC_LIST, idx: 88117 } },
 };
 
-const issuedDelegation = await adc.issue({
+const { credential: issuedDelegation, salt, purpose_commitment } = await adc.issue({
   adc: delegation,
   aic: card,
   walletKey: wallet.privateKey,
@@ -136,8 +141,18 @@ const issuedDelegation = await adc.issue({
 });
 ok('delegation issued, bound to one card and one key');
 ok(`valid for ${Math.round((delegation.exp - delegation.iat) / 86400)} days`);
+ok('her sentence is committed to and withheld; she keeps the salt');
+
+try {
+  await adc.issue({ adc: { ...delegation, purpose_commitment: undefined }, aic: card, walletKey: wallet.privateKey, holderJwk: agentJwk, selective: [] });
+  no('the purpose was issued in the clear. That is a bug.');
+} catch {
+  ok('refused to issue with her sentence readable by the office');
+}
+
 say();
-say(adc.explain(delegation).split('\n').map((l) => `    ${l}`).join('\n'));
+say('  What SHE sees:');
+say(adc.explain({ ...delegation, purpose_commitment }).split('\n').map((l) => `    ${l}`).join('\n'));
 
 // ─────────────────────────────────────────────────────────── 3
 rule('3. The agent presents both to a caseworker, with key binding');
@@ -150,9 +165,11 @@ const presentedCard = await aic.jwkThumbprint(agentJwk).then(() =>
     present(issuedCard, { reveal: [], audience: AUD, nonce: NONCE, holderKey: agent.privateKey }),
   ),
 );
-const presentedDelegation = await import('../src/sdjwt.js').then(({ present }) =>
-  present(issuedDelegation, { audience: AUD, nonce: NONCE, holderKey: agent.privateKey }),
-);
+const presentedDelegation = await adc.present(issuedDelegation, {
+  audience: AUD,
+  nonce: NONCE,
+  holderKey: agent.privateKey,
+});
 
 const vCard = await aic.verify(presentedCard, { issuerKey: issuer.publicKey, audience: AUD, nonce: NONCE });
 ok(`card verified. Agent "${vCard.card.agent.name}", built by ${vCard.card.builder.legal_name}`);
@@ -166,6 +183,16 @@ const vDel = await adc.verify(presentedDelegation, {
   nonce: NONCE,
 });
 ok('delegation verified, key-bound to the presenting agent');
+say();
+say('  What the CASEWORKER sees:');
+say(capability.explainToVerifier(vDel.adc).split('\n').map((l) => `    ${l}`).join('\n'));
+say();
+if (vDel.adc.purpose === undefined) {
+  ok('the words "Severely Handicapped" never reached the office');
+} else {
+  no('her sentence reached the office. That is a bug.');
+}
+ok(`and she can still prove what she consented to: ${capability.verifyPurpose(delegation.purpose, salt, vDel.adc.purpose_commitment)}`);
 
 // ─────────────────────────────────────────────────────────── 4
 rule('4. The verifier checks the status list, and fails closed when it cannot');
@@ -194,18 +221,29 @@ rule('5. Overreach is refused, not trimmed');
 
 const wider = {
   ...delegation,
+  purpose_commitment,
   authorization_details: [
-    { ...delegation.authorization_details[0], actions: ['read', 'draft', 'submit', 'appeal', 'correspond'] },
+    ...delegation.authorization_details,
+    { type: 'ca_public_service_request', capability: 'correspond:administrative', actions: ['correspond'], constraints: {} },
   ],
 };
 const breach = adc.validate(wider, { aic: card });
 breach.problems.forEach((p) => no(p));
 
-const quieterPurpose = { ...delegation, purpose: 'Have a look at what I might be able to get.' };
+const quieterPurpose = { ...delegation, purpose_commitment, purpose: 'Have a look at what I might be able to get.' };
 adc.validate(quieterPurpose, { aic: card }).problems
   .filter((p) => p.includes('purpose sentence'))
   .forEach((p) => no(p));
 ok('the narrower of the sentence and the grant governs');
+
+const leaky = {
+  ...delegation,
+  purpose_commitment,
+  authorization_details: [{ ...delegation.authorization_details[0], type: 'aish_disability_application' }],
+};
+adc.validate(leaky, { aic: card }).problems
+  .filter((p) => p.includes('information'))
+  .forEach((p) => no(p));
 
 // ─────────────────────────────────────────────────────────── 5b
 rule('5b. A tier 3 determination is a malformed credential');

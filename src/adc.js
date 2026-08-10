@@ -22,7 +22,13 @@
  *   reached.
  */
 
-import { issue as sdIssue, verify as sdVerify } from './sdjwt.js';
+import { issue as sdIssue, verify as sdVerify, present as sdPresent } from './sdjwt.js';
+import {
+  CAPABILITIES,
+  actionsFor,
+  commitPurpose,
+  screenDelegation,
+} from './capability.js';
 
 export const ADC_VCT = 'https://agentcredential.ca/adc/v1';
 
@@ -45,6 +51,10 @@ const ACTION_REQUIRES = {
  * Actions a purpose sentence has to actually mention. The check is deliberately
  * crude: it catches a grant that reaches further than the sentence the person
  * read, and it does not pretend to understand the sentence.
+ *
+ * Only runs when the purpose is present, which is on the person's own copy. A
+ * verifier holding a withheld purpose cannot run this and does not need to: the
+ * capability, which it can read, is the narrower of the two by construction.
  */
 const PURPOSE_HINTS = {
   submit: /\b(submit|apply|application|file|lodge)\b/i,
@@ -83,8 +93,20 @@ export function validate(adc, { aic, now = Date.now() } = {}) {
   if (!adc.delegate?.aic_thumbprint) problems.push('delegate.aic_thumbprint is required; a delegation binds to one card');
   if (!adc.delegate?.cnf_thumbprint) problems.push('delegate.cnf_thumbprint is required; and to one key');
 
-  if (!adc.purpose || adc.purpose.trim().length < 10) {
-    problems.push('purpose is required, human-authored, and is what the person and the caseworker are shown');
+  // The person's own sentence, and the commitment that proves it unchanged.
+  // On the wallet's copy both are present. On a presentation the sentence is
+  // withheld by default and only the commitment travels.
+  if (adc.purpose !== undefined && adc.purpose.trim().length < 10) {
+    problems.push('purpose, when present, is human-authored and must be a real sentence');
+  }
+  if (!adc.purpose_commitment) {
+    problems.push(
+      'purpose_commitment is required. It lets the person prove what they consented to ' +
+        'without the sentence itself having to travel.',
+    );
+  }
+  if (adc.purpose === undefined && adc.purpose_commitment === undefined) {
+    problems.push('a delegation with neither a purpose nor a commitment records no consent at all');
   }
 
   if (!Array.isArray(adc.authorization_details) || adc.authorization_details.length === 0) {
@@ -98,8 +120,34 @@ export function validate(adc, { aic, now = Date.now() } = {}) {
         const unknown = d.actions.filter((a) => !ACTIONS.includes(a));
         if (unknown.length) problems.push(`authorization_details[${i}] has unknown actions: ${unknown.join(', ')}`);
       }
-      if (!Array.isArray(d.programs) || d.programs.length === 0) {
-        problems.push(`authorization_details[${i}].programs must name at least one programme`);
+      if (!d.capability) {
+        problems.push(
+          `authorization_details[${i}].capability is required. It is the public, ` +
+            'subject-free description of what the agent may do.',
+        );
+      } else if (!(d.capability in CAPABILITIES)) {
+        problems.push(
+          `authorization_details[${i}].capability "${d.capability}" is not in the vocabulary. ` +
+            `Known: ${Object.keys(CAPABILITIES).join(', ')}`,
+        );
+      } else {
+        const permitted = actionsFor([d.capability]);
+        const beyond = (d.actions ?? []).filter((a) => !permitted.includes(a));
+        if (beyond.length) {
+          problems.push(
+            `authorization_details[${i}] grants ${beyond.join(', ')} but the capability ` +
+              `"${d.capability}" only permits ${permitted.join(', ')}`,
+          );
+        }
+      }
+
+      // Naming the programme tells the verifier what it already knew and tells
+      // everyone else something they should not have. See capability.js.
+      if (Array.isArray(d.programs) && d.programs.length) {
+        problems.push(
+          `authorization_details[${i}].programs names a programme in the clear. ` +
+            'The verifier already knows which office it is. Remove it.',
+        );
       }
     });
   }
@@ -118,7 +166,8 @@ export function validate(adc, { aic, now = Date.now() } = {}) {
 
   if (!adc.status?.status_list?.uri) problems.push('status.status_list.uri is required');
 
-  problems.push(...purposeDisagreements(adc));
+  if (adc.purpose !== undefined) problems.push(...purposeDisagreements(adc));
+  problems.push(...screenDelegation(adc));
   if (aic) problems.push(...attenuationBreaches(adc, aic));
 
   return { ok: problems.length === 0, problems };
@@ -180,10 +229,69 @@ export function attenuationBreaches(adc, aic) {
   return out;
 }
 
-export async function issue({ adc, aic, walletKey, holderJwk, kid, alg = 'ES256', selective = [] }) {
-  const { ok, problems } = validate(adc, { aic });
+/**
+ * Issue a delegation.
+ *
+ * The purpose is committed to and then hidden by default. `selective` defaults
+ * to hiding it rather than requiring every caller to remember, because a
+ * default that has to be remembered is not a default. Passing an explicit
+ * `selective` that omits "purpose" puts the person's sentence in the clear and
+ * is refused.
+ *
+ * Returns the credential and the salt. **The salt belongs to the person**, and
+ * without it they cannot later prove which sentence they consented to.
+ */
+export async function issue({ adc, aic, walletKey, holderJwk, kid, alg = 'ES256', selective = ['purpose'] }) {
+  if (adc.purpose !== undefined && !selective.includes('purpose')) {
+    throw new Error(
+      'refusing to issue a delegation with the purpose in the clear. ' +
+        'The sentence names what the person is going through; the capability is what the verifier reads.',
+    );
+  }
+
+  let payload = adc;
+  let salt = null;
+  if (adc.purpose !== undefined && !adc.purpose_commitment) {
+    const committed = commitPurpose(adc.purpose);
+    salt = committed.salt;
+    payload = { ...adc, purpose_commitment: committed.commitment };
+  }
+
+  const { ok, problems } = validate(payload, { aic });
   if (!ok) throw new Error(`Agent Delegation Credential is not conforming:\n  - ${problems.join('\n  - ')}`);
-  return sdIssue({ payload: adc, selective, privateKey: walletKey, holderJwk, kid, alg });
+
+  const credential = await sdIssue({
+    payload,
+    selective: selective.filter((c) => c in payload),
+    privateKey: walletKey,
+    holderJwk,
+    kid,
+    alg,
+  });
+  return { credential, salt, purpose_commitment: payload.purpose_commitment };
+}
+
+/**
+ * Present a delegation to a verifier.
+ *
+ * Withholds the purpose unless the person explicitly chooses to show it. This
+ * exists as its own function rather than leaving callers to use the general
+ * SD-JWT `present()`, whose default is to reveal every disclosure. That default
+ * is correct for a general library and wrong here: it would mean the person's
+ * sentence travels whenever somebody forgets an argument, and a privacy
+ * property that depends on remembering is not a property.
+ *
+ * `disclosePurpose` is the person's decision and nobody else's. There is no
+ * verifier-side option to require it, on purpose.
+ */
+export async function present(credential, { audience, nonce, holderKey, disclosePurpose = false, alg = 'ES256' }) {
+  return sdPresent(credential, {
+    reveal: disclosePurpose ? ['purpose'] : [],
+    audience,
+    nonce,
+    holderKey,
+    alg,
+  });
 }
 
 export async function verify(presented, { walletKey, aic, audience, nonce, now = Date.now() }) {
@@ -202,8 +310,12 @@ export async function verify(presented, { walletKey, aic, audience, nonce, now =
 }
 
 /**
- * What the caseworker is shown. Plain sentences, because a delegation nobody
- * reads is a delegation nobody consented to.
+ * What the **person** is shown, at the moment of granting and afterwards.
+ *
+ * This is their own copy, so it names what they are actually doing. For what a
+ * caseworker sees, which is the subject-free version, use
+ * `capability.explainToVerifier()`. Keeping these as two functions is the whole
+ * point: one audience gets the sentence, the other gets the shape.
  */
 export function explain(adc) {
   const actions = [...new Set((adc.authorization_details ?? []).flatMap((d) => d.actions ?? []))];
