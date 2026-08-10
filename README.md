@@ -1,7 +1,21 @@
 # @kindred/kya
 
-Know Your Agent. The OpenID Federation leaf-entity subset plus a Government of
-Alberta credential adapter.
+Know Your Agent. Two credentials that let a software agent act for a person in
+their dealings with government, in a form the government can verify and the
+person can withdraw.
+
+**Given away.** Specification under CC BY 4.0, this implementation under
+Apache-2.0, with an irrevocable patent non-assertion covenant in
+[PATENTS.md](PATENTS.md). Implement it, fork it, ship it. Nobody needs to ask
+us, and we would rather DIACC and the Digital Governance Council stewarded it
+than we did.
+
+```bash
+npm install
+npm test              # 27 tests, each named after the promise it defends
+npm run demo          # end to end, no network
+npm run verify:alberta   # talks to Alberta's live trust anchor
+```
 
 ## Why this exists
 
@@ -72,16 +86,62 @@ Schema annotation. Their base schema is titled "SD-JWT Schema (RFC-9901)", so th
 are tracking the ratified RFC and will likely converge. Everything Alberta-specific
 is behind `src/alberta.js` so it can be deleted when they do.
 
+## The four properties this enforces in code
+
+These are the reason the package exists. Each is a rule the specification states
+and this implementation refuses to break, rather than a guideline an operator is
+trusted to follow.
+
+**An agent cannot be configured to deny being an agent.** `conduct.discloses_ai`
+is `always`. A card carrying anything else does not issue and does not verify.
+
+**Accountability cannot be hidden.** `accountable`, `conduct`, `capabilities`,
+`agent` and `status` are never selectively disclosable. Asking to hide one throws
+at issue time. A verifier must never have to ask who is answerable for this
+thing.
+
+**Authority narrows and never widens.** A delegation may not grant an action the
+Agent Identity Card does not hold, and where the human-authored `purpose`
+sentence promises less than `authorization_details` grants, the narrower governs
+and the credential is rejected. Rejected, not trimmed: silently clamping hides a
+bug in whoever built the chain.
+
+**An inference cannot wear the clothes of a decision.** Every determination
+carries a `rule_basis` naming its tier. A tier 3 determination, meaning an answer
+where no authoritative rule is published, is a malformed credential. See
+[the Authoritative Rules Commitment](spec/authoritative-rules-commitment.md).
+
+And one that is a service obligation rather than a data structure: **a verifier
+that cannot reach a fresh status list treats the credential as not in force.**
+Not "probably fine", not "warn and proceed". `inForce()` is one function so the
+rule cannot drift between callers.
+
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `src/federation.js` | OpenID Federation 1.0, leaf subset. Anchor fetch, statement verification, one-hop chain validation |
-| `src/alberta.js` | Alberta profile: entity types, accepted `typ` values, status-claim normalisation, deviation list |
+| `src/sdjwt.js` | SD-JWT VC: disclosures, digests, key binding. The subset these credentials need; the gaps are listed at the bottom of the file |
+| `src/aic.js` | Agent Identity Card. What the agent is, and who is accountable |
+| `src/adc.js` | Agent Delegation Credential. What the person authorised, and for how long |
+| `src/status.js` | Token Status List, the fail-closed rule, and the revocation receipt |
+| `src/determination.js` | `rule_basis`. Call the rule, cite the provision, or navigate only |
+| `src/federation.js` | OpenID Federation 1.0, leaf subset. Anchor fetch, statement verification, chain validation |
+| `src/alberta.js` | Alberta profile, quarantined so it can be deleted when they converge |
+| `bin/make-keys.js` | Three key pairs: issuer, wallet, agent |
+| `bin/make-entity-config.js` | The signed Entity Configuration to publish at `/.well-known/openid-federation` |
+| `bin/demo-delegation.js` | Issue, delegate, present, revoke. No network |
 | `bin/verify-alberta.js` | The interoperability proof |
 
 ## Status
 
-Working proof of chain validation. Not yet built: the Agent Identity Card
-credential itself, the delegation credential, and the revocation service. See
-`../knowledge-base/kya/BUILD-PLAN.md`.
+The credentials, the status list, the rule basis, and the federation half are
+built and tested. Two things are specified and not built: the **citizen-facing
+revocation service** in section 7, which is a running service rather than a
+library, and **chained delegation** through an intermediary such as a navigator,
+which waits on the Delegate SD-JWT draft stabilising.
+
+One known unsolved problem, written down rather than deferred:
+[the privacy gap](../knowledge-base/kya/PRIVACY-GAP.md). A stable agent
+identifier correlates its principal across every service they touch, which is
+close to the opposite of what sector-specific identifiers exist to prevent. We
+would rather raise it first than be found holding it.
