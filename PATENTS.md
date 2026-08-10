@@ -30,4 +30,4 @@ attack on the people relying on it.
 Kindred's intent in publishing this is that no implementer of these
 specifications should have to consider Kindred's patent position at all.
 
-Contact: trust@wethekindred.com
+Contact: trust@thekindredagency.com

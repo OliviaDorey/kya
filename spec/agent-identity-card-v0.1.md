@@ -112,7 +112,7 @@ to a delegation. Answers question 1.
     "legal_name": "The Kindred Agency Inc.",
     "jurisdiction": "CA-NS",
     "registry_id": "…",                         // corporate number
-    "uri": "https://wethekindred.com"
+    "uri": "https://thekindredagency.com"
   },
 
   "operator": {                                 // who runs it, if different
@@ -122,8 +122,8 @@ to a delegation. Answers question 1.
 
   "accountable": {                              // question 5's human end
     "role": "Chief Technology Officer",
-    "contact": "trust@wethekindred.com",
-    "redress_uri": "https://wethekindred.com/redress"
+    "contact": "trust@thekindredagency.com",
+    "redress_uri": "https://thekindredagency.com/redress"
   },
 
   "model": {                                    // "undisclosed" is permitted, silence is not
@@ -385,4 +385,4 @@ Digital Governance Council) on the trust and assurance model; **John Spicer**
 (Service New Brunswick, DIACC board) on how this should present to the trust
 framework; and the DIF Trusted AI Agents working group on overlap with KYA-OS.
 
-Comments to `trust@wethekindred.com`.
+Comments to `trust@thekindredagency.com`.
