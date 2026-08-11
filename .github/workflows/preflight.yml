@@ -1,0 +1,85 @@
+name: Pre-flight audit
+
+# Belt and braces for the scheduled task on Olivia's machine, which only runs
+# while the app is open. This runs whether anyone is at a keyboard or not.
+#
+# The check that matters is "spec matches code". Those two drifted apart in four
+# days in August 2026, silently, because both were moving. A red X on a Monday
+# morning is the cheapest possible way to find that out.
+
+on:
+  schedule:
+    - cron: '23 11 * * 1'     # Mondays, 11:23 UTC
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'spec/**'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: kya
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        working-directory: kya
+        run: npm ci
+
+      - name: Tests
+        working-directory: kya
+        run: npm test
+
+      # The audit script expects the estate layout, with kya as a subdirectory.
+      # In CI only this repository exists, so the checks that reach into
+      # sibling repositories are skipped and the rest still run.
+      - name: Spec matches code
+        working-directory: kya
+        run: |
+          node -e "
+          const fs = require('fs');
+          const spec = fs.readFileSync('spec/agent-identity-card-v0.2.md','utf8');
+          const problems = [];
+          if (/\"programs\"\s*:\s*\[/.test(spec)) problems.push('spec still names a programme in the clear, which the validator rejects');
+          if (!/\"capability\"/.test(spec)) problems.push('spec does not mention capability, now required on every authorization_detail');
+          if (!/purpose_commitment/.test(spec)) problems.push('spec does not mention purpose_commitment, now required');
+          import('./src/capability.js').then(({ CAPABILITIES }) => {
+            const missing = Object.keys(CAPABILITIES).filter(c => !spec.includes(c));
+            if (missing.length) problems.push('capabilities in code but not in the spec: ' + missing.join(', '));
+            if (problems.length) {
+              console.error('::error::The published specification no longer matches the code.');
+              problems.forEach(p => console.error('  - ' + p));
+              process.exit(1);
+            }
+            console.log('The published shape is the shape the code accepts.');
+          });
+          "
+
+      - name: The privacy commitment still holds
+        working-directory: kya
+        run: |
+          node -e "
+          import('./src/capability.js').then(c => {
+            const caught = c.screen('aish_disability_application').length > 0;
+            const clean  = c.screen('submit a form and track its status').length === 0;
+            if (!caught) { console.error('::error::The sensitive-term screen let a health term through.'); process.exit(1); }
+            if (!clean)  { console.error('::error::The screen is over-firing and somebody will turn it off.'); process.exit(1); }
+            console.log('Screen catches what it should and nothing it should not.');
+          });
+          "
+
+      - name: The accountability link is alive
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://thekindredagency.com/redress || echo 000)
+          if [ "$code" != "200" ]; then
+            echo "::error::thekindredagency.com/redress returned $code. That URL is the redress_uri in every credential we issue."
+            exit 1
+          fi
+          echo "redress page is live"
