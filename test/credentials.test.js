@@ -70,6 +70,43 @@ const baseDelegation = (over = {}) => ({
   ...over,
 });
 
+/** What she holds while the application is in flight: submission, and nothing else. */
+const submitOnlyDelegation = (over = {}) => baseDelegation({
+  purpose: 'Apply for the programme on my behalf and tell me what happens.',
+  authorization_details: [
+    {
+      type: 'ca_public_service_request',
+      capability: 'submit:form',
+      actions: ['draft', 'submit'],
+      constraints: { requires_human_approval: ['submit'] },
+    },
+  ],
+  ...over,
+});
+
+/** What she grants after the refusal. A different capability, not a wider one. */
+const appealDelegation = (over = {}) => baseDelegation({
+  purpose: 'The decision went against me. Appeal it on my behalf and keep me told.',
+  authorization_details: [
+    {
+      type: 'ca_public_service_request',
+      capability: 'request:review',
+      actions: ['appeal'],
+      constraints: { requires_human_approval: ['appeal'] },
+    },
+  ],
+  consent: { record_uri: 'https://wallet.example.ca/c/2', captured_at: new Date().toISOString(), language: 'en-CA', method: 'in-app-explicit' },
+  revocation: { revoke_uri: 'https://revoke.agentcredential.ca/d/2', citizen_facing: true },
+  status: { status_list: { uri: 'https://status.agentcredential.ca/adc', idx: 2 } },
+  ...over,
+});
+
+/** The same agent, on a card that was never given any appeal capability. */
+const cardWithoutAppeal = () => ({
+  ...baseCard(),
+  capabilities: baseCard().capabilities.filter((c) => c !== 'draft:appeal' && c !== 'submit:appeal'),
+});
+
 // ───────────────────────────────────────────────────── SD-JWT
 
 test('a withheld claim is distinguishable from an absent one', async () => {
@@ -252,6 +289,93 @@ test('a conforming delegation round-trips through issue and verify', async () =>
   assert.match(shown, /Submit a form and track its status/);
   assert.doesNotMatch(shown, /Handicapped|Assured Income/i);
   assert.match(shown, /withheld from you by design/);
+});
+
+// ───────────────────────────────────────────────────── The appeal
+
+test('a delegation scoped to submitting an application cannot appeal the refusal', () => {
+  const submitOnly = submitOnlyDelegation();
+  assert.equal(adc.validate(submitOnly, { aic: baseCard() }).ok, true, 'the submission delegation is conforming');
+  assert.equal(adc.permits(submitOnly, 'submit'), true);
+  assert.equal(adc.permits(submitOnly, 'appeal'), false, 'an appeal is a different capability, not a later step');
+
+  // And it cannot be quietly stretched to reach one, either.
+  const stretched = submitOnlyDelegation({
+    authorization_details: [
+      {
+        type: 'ca_public_service_request',
+        capability: 'submit:form',
+        actions: ['draft', 'submit', 'appeal'],
+        constraints: { requires_human_approval: ['submit', 'appeal'] },
+      },
+    ],
+  });
+  const { ok, problems } = adc.validate(stretched, { aic: baseCard() });
+  assert.equal(ok, false);
+  assert.ok(problems.some((p) => p.includes('grants appeal') && p.includes('only permits draft, submit')));
+});
+
+test('the appeal becomes possible because she grants a second delegation, and it verifies', async () => {
+  const appeal = appealDelegation();
+  const { credential, salt } = await adc.issue({
+    adc: { ...appeal, purpose_commitment: undefined },
+    aic: baseCard(),
+    walletKey: wallet.privateKey,
+    holderJwk: agentJwk,
+  });
+  const presented = await adc.present(credential, { audience: 'https://v.ca', nonce: 'n-appeal', holderKey: agent.privateKey });
+  const { adc: got } = await adc.verify(presented, {
+    walletKey: wallet.publicKey,
+    aic: baseCard(),
+    audience: 'https://v.ca',
+    nonce: 'n-appeal',
+  });
+
+  assert.equal(adc.permits(got, 'appeal'), true);
+  assert.equal(adc.permits(got, 'submit'), false, 'the second delegation is no wider than the first was');
+
+  // The same privacy properties hold on the way back up as on the way in.
+  assert.equal(got.purpose, undefined, 'the sentence about being refused must not reach the verifier');
+  assert.ok(capability.verifyPurpose(appeal.purpose, salt, got.purpose_commitment));
+
+  const shown = capability.explainToVerifier(got);
+  assert.match(shown, /Ask for a decision to be looked at again/);
+  assert.match(shown, /before it can: appeal/);
+  assert.doesNotMatch(shown, /Handicapped|Assured Income|refused/i);
+});
+
+test('an appeal the Agent Identity Card does not carry is refused, not trimmed', async () => {
+  const appeal = appealDelegation();
+  const { ok, problems } = adc.validate(appeal, { aic: cardWithoutAppeal() });
+  assert.equal(ok, false);
+  assert.ok(problems.some((p) => p.includes('grants "appeal"') && p.includes('does not carry "draft:appeal"')));
+  assert.ok(problems.some((p) => p.includes('may only narrow')));
+
+  await assert.rejects(
+    () => adc.issue({
+      adc: { ...appeal, purpose_commitment: undefined },
+      aic: cardWithoutAppeal(),
+      walletKey: wallet.privateKey,
+      holderJwk: agentJwk,
+    }),
+    /does not carry "draft:appeal"/,
+  );
+
+  // Refusal, not a silent trim: the grant is left exactly as it was written, so
+  // whoever built it finds out rather than shipping a delegation that does less
+  // than the person was told it does.
+  assert.deepEqual(appeal.authorization_details[0].actions, ['appeal']);
+});
+
+test('the narrower of the purpose sentence and the grant governs the appeal too', () => {
+  const silent = appealDelegation({ purpose: 'Please keep working on my file now that the letter has come.' });
+  const { ok, problems } = adc.validate(silent, { aic: baseCard() });
+  assert.equal(ok, false);
+  assert.ok(problems.some((p) => p.includes('grants "appeal"') && p.includes('never mentions it')));
+
+  // The check runs both ways round: a sentence that does say it passes.
+  const spoken = appealDelegation({ purpose: 'Ask them to review the decision that went against me.' });
+  assert.equal(adc.validate(spoken, { aic: baseCard() }).ok, true);
 });
 
 // ───────────────────────────────────────────────────── Status

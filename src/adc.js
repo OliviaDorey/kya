@@ -190,6 +190,19 @@ export function purposeDisagreements(adc) {
   return out;
 }
 
+/**
+ * Does this delegation authorise this action, yes or no.
+ *
+ * The question worth asking out loud is the appeal. A delegation scoped to
+ * submitting an application does not carry an appeal, because an appeal is a
+ * different capability and not a later step of the same one. So the answer here
+ * is no, and the remedy is a second delegation the person grants after the
+ * refusal rather than a wider one granted before it, when she had no reason to.
+ */
+export function permits(adc, action) {
+  return (adc.authorization_details ?? []).some((d) => (d.actions ?? []).includes(action));
+}
+
 /** Authority narrows going down. Anything else is a bug in whoever built the chain. */
 export function attenuationBreaches(adc, aic) {
   const out = [];
