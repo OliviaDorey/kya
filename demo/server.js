@@ -75,6 +75,10 @@ app.get('/caseworker', async (req, res, next) => {
       const vDel = await adc.verify(presentedDelegation, {
         walletKey: world.keys.wallet.publicKey,
         aic: vCard.card,
+        // The binding, recomputed from the card that just verified. Without
+        // this the delegation is checked against a card object rather than
+        // against the card actually presented, which is no check at all.
+        aicThumbprint: vCard.thumbprint,
         audience: VERIFIER,
         nonce,
       });

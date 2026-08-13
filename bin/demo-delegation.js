@@ -59,7 +59,14 @@ const card = {
     redress_uri: 'https://thekindredagency.com/redress',
   },
   model: { disclosed: true, family: 'claude-opus', version: '5', hosted_in: 'CA' },
-  capabilities: ['read:program-information', 'draft:application', 'submit:application', 'draft:appeal', 'monitor:status'],
+  capabilities: [
+    'read:program-information',
+    'draft:application',
+    'submit:application',
+    'draft:appeal',
+    'submit:appeal',
+    'monitor:status',
+  ],
   conduct: { discloses_ai: 'always', acts_without_approval: false, retains_after_revocation: 'audit-record-only' },
   assurance: { framework: 'PCTF', level: 'pending', assessed_by: null, assessed_at: null },
   status: { status_list: { uri: AIC_LIST, idx: 4213 } },
@@ -176,10 +183,28 @@ ok(`model withheld this time: ${vCard.card.model === undefined ? 'yes, and the v
 const vDel = await adc.verify(presentedDelegation, {
   walletKey: wallet.publicKey,
   aic: vCard.card,
+  aicThumbprint: vCard.thumbprint,   // recomputed from the card just presented
   audience: AUD,
   nonce: NONCE,
 });
 ok('delegation verified, key-bound to the presenting agent');
+ok('and bound to the card presented with it: both thumbprints recomputed and compared');
+
+// The binding is the reason there are two credentials rather than one. A
+// delegation carried alongside somebody else's card is refused outright.
+const strangersCard = await aic.issue({ card, privateKey: issuer.privateKey, holderJwk: agentJwk });
+try {
+  await adc.verify(presentedDelegation, {
+    walletKey: wallet.publicKey,
+    aic: vCard.card,
+    presentedCard: strangersCard,
+    audience: AUD,
+    nonce: NONCE,
+  });
+  no('a delegation verified against a card it was not granted against. That is a bug.');
+} catch (e) {
+  no(e.message.split('\n')[1].replace(/^\s*-\s*/, '').split('.')[0]);
+}
 say();
 say('  What the CASEWORKER sees:');
 say(capability.explainToVerifier(vDel.adc).split('\n').map((l) => `    ${l}`).join('\n'));
@@ -261,7 +286,10 @@ adc.validate(stretched, { aic: card }).problems
   .forEach((p) => no(p));
 
 // She grants a fresh one. It is granted only because the card already carries
-// draft:appeal; a delegation can narrow what the card holds and never widen it.
+// draft:appeal and submit:appeal; a delegation can narrow what the card holds and
+// never widen it. Drafting the appeal and filing it are two separate grants, for
+// the same reason drafting a form and submitting it are: filing is irreversible
+// and it starts or forfeits a clock.
 const appeal = {
   ...delegation,
   purpose: 'The decision went against me. Appeal it on my behalf and keep me told.',
@@ -272,7 +300,7 @@ const appeal = {
     {
       type: 'ca_public_service_request',
       capability: 'request:review',
-      actions: ['appeal'],
+      actions: ['draft-appeal', 'appeal'],
       constraints: { requires_human_approval: ['appeal'], valid_until: '2026-12-31' },
     },
   ],
@@ -292,7 +320,15 @@ const { credential: issuedAppeal, salt: appealSalt } = await adc.issue({
   walletKey: wallet.privateKey,
   holderJwk: agentJwk,
 });
-ok('second delegation issued, granted only because the card already carries draft:appeal');
+ok('second delegation issued, granted only because the card carries draft:appeal and submit:appeal');
+
+// Drafting an appeal is not filing one. A card that may prepare an appeal but was
+// never given submit:appeal cannot lodge it, and finds that out here rather than
+// after the clock has started.
+const drafterOnly = { ...card, capabilities: card.capabilities.filter((c) => c !== 'submit:appeal') };
+adc.validate(appeal, { aic: drafterOnly }).problems
+  .filter((p) => p.includes('submit:appeal'))
+  .forEach((p) => no(p));
 
 const APPEAL_NONCE = 'n-8b21d4';
 const presentedAppeal = await adc.present(issuedAppeal, {
@@ -303,6 +339,7 @@ const presentedAppeal = await adc.present(issuedAppeal, {
 const vAppeal = await adc.verify(presentedAppeal, {
   walletKey: wallet.publicKey,
   aic: vCard.card,
+  aicThumbprint: vCard.thumbprint,
   audience: AUD,
   nonce: APPEAL_NONCE,
 });

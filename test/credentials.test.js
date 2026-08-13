@@ -36,10 +36,21 @@ const baseCard = () => ({
   builder: { legal_name: 'The Kindred Agency Inc.', jurisdiction: 'CA-NS', registry_id: '1', uri: 'https://thekindredagency.com' },
   accountable: { role: 'CTO', contact: 'trust@thekindredagency.com', redress_uri: 'https://thekindredagency.com/redress' },
   model: { disclosed: true, family: 'claude-opus', version: '5', hosted_in: 'CA' },
-  capabilities: ['read:program-information', 'draft:application', 'submit:application', 'draft:appeal'],
+  capabilities: ['read:program-information', 'draft:application', 'submit:application', 'draft:appeal', 'submit:appeal'],
   conduct: { discloses_ai: 'always', acts_without_approval: false, retains_after_revocation: 'audit-record-only' },
   status: { status_list: { uri: 'https://status.agentcredential.ca/aic', idx: 1 } },
 });
+
+/**
+ * The real thumbprints, computed from the card and key actually used below.
+ *
+ * These were the string 'x' and the string 'y' until v0.3, which passed because
+ * nothing compared them to anything. They are computed now because the binding
+ * is enforced now.
+ */
+const issuedBaseCard = await aic.issue({ card: baseCard(), privateKey: issuer.privateKey, holderJwk: agentJwk });
+const BASE_CARD_THUMB = await aic.cardThumbprint(issuedBaseCard);
+const AGENT_KEY_THUMB = await aic.jwkThumbprint(agentJwk);
 
 const baseDelegation = (over = {}) => ({
   vct: adc.ADC_VCT,
@@ -47,7 +58,7 @@ const baseDelegation = (over = {}) => ({
   iat: sec,
   exp: sec + 7 * 86400,
   delegator: { sub: 'pw:abc', pairwise: true, verified_by: 'https://account.alberta.ca/dts', assurance: 'substantial' },
-  delegate: { agent_id: AGENT_ID, aic_thumbprint: 'x', cnf_thumbprint: 'y' },
+  delegate: { agent_id: AGENT_ID, aic_thumbprint: BASE_CARD_THUMB, cnf_thumbprint: AGENT_KEY_THUMB },
   purpose: 'Apply for the Alberta Assured Income for the Severely Handicapped on my behalf, and appeal if I am refused.',
   purpose_commitment: capability.commitPurpose('x').commitment,
   authorization_details: [
@@ -60,7 +71,7 @@ const baseDelegation = (over = {}) => ({
     {
       type: 'ca_public_service_request',
       capability: 'request:review',
-      actions: ['appeal'],
+      actions: ['draft-appeal', 'appeal'],
       constraints: { requires_human_approval: ['appeal'] },
     },
   ],
@@ -91,7 +102,7 @@ const appealDelegation = (over = {}) => baseDelegation({
     {
       type: 'ca_public_service_request',
       capability: 'request:review',
-      actions: ['appeal'],
+      actions: ['draft-appeal', 'appeal'],
       constraints: { requires_human_approval: ['appeal'] },
     },
   ],
@@ -275,6 +286,7 @@ test('a conforming delegation round-trips through issue and verify', async () =>
   const { adc: got } = await adc.verify(presented, {
     walletKey: wallet.publicKey,
     aic: baseCard(),
+    presentedCard: issuedBaseCard,
     audience: 'https://v.ca',
     nonce: 'n',
   });
@@ -327,6 +339,7 @@ test('the appeal becomes possible because she grants a second delegation, and it
   const { adc: got } = await adc.verify(presented, {
     walletKey: wallet.publicKey,
     aic: baseCard(),
+    presentedCard: issuedBaseCard,
     audience: 'https://v.ca',
     nonce: 'n-appeal',
   });
@@ -348,7 +361,8 @@ test('an appeal the Agent Identity Card does not carry is refused, not trimmed',
   const appeal = appealDelegation();
   const { ok, problems } = adc.validate(appeal, { aic: cardWithoutAppeal() });
   assert.equal(ok, false);
-  assert.ok(problems.some((p) => p.includes('grants "appeal"') && p.includes('does not carry "draft:appeal"')));
+  assert.ok(problems.some((p) => p.includes('grants "draft-appeal"') && p.includes('does not carry "draft:appeal"')));
+  assert.ok(problems.some((p) => p.includes('grants "appeal"') && p.includes('does not carry "submit:appeal"')));
   assert.ok(problems.some((p) => p.includes('may only narrow')));
 
   await assert.rejects(
@@ -364,7 +378,53 @@ test('an appeal the Agent Identity Card does not carry is refused, not trimmed',
   // Refusal, not a silent trim: the grant is left exactly as it was written, so
   // whoever built it finds out rather than shipping a delegation that does less
   // than the person was told it does.
-  assert.deepEqual(appeal.authorization_details[0].actions, ['appeal']);
+  assert.deepEqual(appeal.authorization_details[0].actions, ['draft-appeal', 'appeal']);
+});
+
+test('a card that may draft an appeal may not thereby file one', () => {
+  // v0.3. Filing an appeal is irreversible and it starts or forfeits a clock, so
+  // it is a separate grant from preparing one, exactly as submitting a form is a
+  // separate grant from drafting it.
+  const drafterOnly = { ...baseCard(), capabilities: baseCard().capabilities.filter((c) => c !== 'submit:appeal') };
+
+  const drafting = appealDelegation({
+    purpose: 'Draft an appeal of the decision for me to look at before anything is filed.',
+    authorization_details: [
+      { type: 'x', capability: 'request:review', actions: ['draft-appeal'], constraints: {} },
+    ],
+  });
+  assert.equal(adc.validate(drafting, { aic: drafterOnly }).ok, true, 'drafting is within draft:appeal');
+  assert.equal(adc.permits(drafting, 'draft-appeal'), true);
+  assert.equal(adc.permits(drafting, 'appeal'), false, 'drafting an appeal is not filing one');
+
+  const filing = appealDelegation();
+  const { ok, problems } = adc.validate(filing, { aic: drafterOnly });
+  assert.equal(ok, false);
+  assert.ok(
+    problems.some((p) => p.includes('grants "appeal"') && p.includes('does not carry "submit:appeal"')),
+    'a card holding only draft:appeal must not be able to file',
+  );
+  // And it is refused rather than trimmed back to the drafting half.
+  assert.deepEqual(filing.authorization_details[0].actions, ['draft-appeal', 'appeal']);
+});
+
+test('filing an appeal needs approval when the card never acts without it', () => {
+  const noApproval = appealDelegation({
+    authorization_details: [
+      { type: 'x', capability: 'request:review', actions: ['draft-appeal', 'appeal'], constraints: {} },
+    ],
+  });
+  const { problems } = adc.validate(noApproval, { aic: baseCard() });
+  assert.ok(problems.some((p) => p.includes('"appeal"') && p.includes('requires_human_approval')));
+
+  // Drafting is the reversible half and does not need to appear there.
+  const draftOnly = appealDelegation({
+    purpose: 'Draft an appeal of the decision for me to look at.',
+    authorization_details: [
+      { type: 'x', capability: 'request:review', actions: ['draft-appeal'], constraints: {} },
+    ],
+  });
+  assert.equal(adc.validate(draftOnly, { aic: baseCard() }).ok, true);
 });
 
 test('the narrower of the purpose sentence and the grant governs the appeal too', () => {
@@ -376,6 +436,118 @@ test('the narrower of the purpose sentence and the grant governs the appeal too'
   // The check runs both ways round: a sentence that does say it passes.
   const spoken = appealDelegation({ purpose: 'Ask them to review the decision that went against me.' });
   assert.equal(adc.validate(spoken, { aic: baseCard() }).ok, true);
+});
+
+// ───────────────────────────────────────────────────── The binding
+
+/** Issue, present, and verify a delegation, so each test below varies one thing. */
+const roundTrip = async (delegation, { holderJwk = agentJwk, holderKey = agent.privateKey, nonce } = {}) => {
+  const { credential } = await adc.issue({
+    adc: { ...delegation, purpose_commitment: undefined },
+    aic: baseCard(),
+    walletKey: wallet.privateKey,
+    holderJwk,
+  });
+  return adc.present(credential, { audience: 'https://v.ca', nonce, holderKey });
+};
+
+test('a delegation and the card it was granted against verify together', async () => {
+  const presented = await roundTrip(baseDelegation(), { nonce: 'n-bound' });
+  const presentedCard = await sdjwt.present(issuedBaseCard, {
+    reveal: [], audience: 'https://v.ca', nonce: 'n-bound', holderKey: agent.privateKey,
+  });
+  const vCard = await aic.verify(presentedCard, { issuerKey: issuer.publicKey, audience: 'https://v.ca', nonce: 'n-bound' });
+
+  const { adc: got } = await adc.verify(presented, {
+    walletKey: wallet.publicKey,
+    aic: vCard.card,
+    aicThumbprint: vCard.thumbprint,
+    audience: 'https://v.ca',
+    nonce: 'n-bound',
+  });
+  assert.equal(got.delegate.aic_thumbprint, vCard.thumbprint, 'the binding is to the card that was actually presented');
+});
+
+test('a delegation presented with a different card is refused', async () => {
+  // A second card, for the same agent, from the same issuer, valid in every way.
+  // The only thing wrong with it is that it is not the card this delegation was
+  // granted against, and that alone must be enough.
+  const otherCard = await aic.issue({ card: baseCard(), privateKey: issuer.privateKey, holderJwk: agentJwk });
+  assert.notEqual(await aic.cardThumbprint(otherCard), BASE_CARD_THUMB, 'the two cards must be distinguishable');
+
+  const presented = await roundTrip(baseDelegation(), { nonce: 'n-swap' });
+  await assert.rejects(
+    () => adc.verify(presented, {
+      walletKey: wallet.publicKey,
+      aic: baseCard(),
+      presentedCard: otherCard,
+      audience: 'https://v.ca',
+      nonce: 'n-swap',
+    }),
+    /aic_thumbprint binding failed/,
+  );
+});
+
+test('a delegation presented with a different holder key is refused', async () => {
+  // The delegation names the agent's key. It is presented, and key-bound, by
+  // somebody else's key. The KB-JWT is valid; the binding is not.
+  const otherJwk = await exportJWK(other.publicKey);
+  const presented = await roundTrip(baseDelegation(), {
+    holderJwk: otherJwk,
+    holderKey: other.privateKey,
+    nonce: 'n-key',
+  });
+  await assert.rejects(
+    () => adc.verify(presented, {
+      walletKey: wallet.publicKey,
+      aic: baseCard(),
+      presentedCard: issuedBaseCard,
+      audience: 'https://v.ca',
+      nonce: 'n-key',
+    }),
+    /cnf_thumbprint binding failed/,
+  );
+});
+
+test('a valid card and a valid delegation held by two different agents cannot be stapled together', async () => {
+  const otherJwk = await exportJWK(other.publicKey);
+  const otherKeyThumb = await aic.jwkThumbprint(otherJwk);
+
+  // This delegation is honestly bound to the other key, so the cnf check passes.
+  // The card presented with it is held by a different key, and that is the breach.
+  const delegation = baseDelegation({
+    delegate: { agent_id: AGENT_ID, aic_thumbprint: BASE_CARD_THUMB, cnf_thumbprint: otherKeyThumb },
+  });
+  const presented = await roundTrip(delegation, {
+    holderJwk: otherJwk,
+    holderKey: other.privateKey,
+    nonce: 'n-staple',
+  });
+
+  const cardClaims = await sdjwt.verify(issuedBaseCard, { issuerKey: issuer.publicKey });
+  await assert.rejects(
+    () => adc.verify(presented, {
+      walletKey: wallet.publicKey,
+      aic: cardClaims.claims,
+      presentedCard: issuedBaseCard,
+      audience: 'https://v.ca',
+      nonce: 'n-staple',
+    }),
+    /holder binding failed/,
+  );
+});
+
+test('a binding that could not be checked is a failed binding, not a passed one', async () => {
+  const presented = await roundTrip(baseDelegation(), { nonce: 'n-none' });
+  await assert.rejects(
+    () => adc.verify(presented, {
+      walletKey: wallet.publicKey,
+      aic: baseCard(),
+      audience: 'https://v.ca',
+      nonce: 'n-none',
+    }),
+    /card binding could not be checked/,
+  );
 });
 
 // ───────────────────────────────────────────────────── Status

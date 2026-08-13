@@ -1,7 +1,11 @@
 # The Agent Identity Card and the Delegation Credential
 
-**Version 0.2 — 10 August 2026.** Supersedes v0.1 of 6 August 2026.
-**Version 0.1, draft for review. 6 August 2026.**
+**Version 0.3 — 13 August 2026.** Supersedes v0.2 of 10 August 2026, which
+superseded v0.1 of 6 August 2026.
+
+The filename still says v0.2. It is left alone deliberately: this file is the
+living specification and several documents outside this repository link to it by
+name. The version above governs.
 
 Editor: Olivia Dorey, The Kindred Agency, Bridgewater, Nova Scotia.
 Status: **draft, not implemented.** Circulated for technical review before code is written.
@@ -105,7 +109,9 @@ to a delegation. Answers question 1.
   "exp": 1817438725,
 
   "agent": {
-    "id": "urn:agent:kindred:steward:7f3a…",   // stable, opaque, non-correlating
+    "id": "urn:agent:kindred:steward:7f3a…",   // stable, opaque, and a lifetime
+                                                // correlator for the person. See
+                                                // the note below §5
     "name": "Steward",                          // shown to the person
     "version": "1.4.2"
   },
@@ -139,7 +145,8 @@ to a delegation. Answers question 1.
     "read:program-information",
     "draft:application",
     "submit:application",
-    "draft:appeal",
+    "draft:appeal",                             // prepare an appeal
+    "submit:appeal",                            // and file it. Two grants, §6
     "monitor:status"
   ],
 
@@ -168,6 +175,36 @@ accountable.
 
 `conduct.discloses_ai` is `always` and is not configurable. An agent that can be
 configured to deny being an agent is a different product.
+
+**The card capability vocabulary.** Closed, and it is the outer bound a delegation
+narrows. An unknown value is a typo, not a feature, and does not verify.
+
+| Capability | What the agent may do | Delegation action it permits |
+|---|---|---|
+| `read:program-information` | Look things up | `read` |
+| `draft:application` | Prepare an application | `draft` |
+| `submit:application` | File one | `submit` |
+| `draft:appeal` | Prepare an appeal | `draft-appeal` |
+| `submit:appeal` | File one | `appeal` |
+| `monitor:status` | Watch a file's progress | `monitor` |
+| `correspond:on-behalf` | Exchange routine correspondence | `correspond` |
+
+Preparing and filing are separate capabilities in both directions, applications
+and appeals alike. See §6.
+
+**On `agent.id` and correlation.** The identifier is stable and opaque. It is
+**not** non-correlating, and v0.2 of this document said it was. An agent that
+carries one identifier to every service it touches is a lifetime correlator for
+the person it acts for: two departments holding presentations from the same
+`agent.id` can join their records on that person exactly, without either doing
+anything wrong and without sharing any personal data. That is close to the
+opposite of what sector-specific identifiers exist to prevent.
+
+This is an open problem, not a solved one. It is written up in full in
+`knowledge-base/kya/PRIVACY-GAP.md` and in §9.1 of the threat model, with the
+candidate directions — chiefly per-relying-party pairwise agent identifiers, and
+what they cost in revocation and audit. Anyone implementing this specification
+should read that before deciding the identifier is safe to log.
 
 ---
 
@@ -215,7 +252,7 @@ questions 2 and 3.
     {
       "type": "ca_public_service_request",
       "capability": "request:review",
-      "actions": ["appeal"],
+      "actions": ["draft-appeal", "appeal"],    // prepare, and file. Two grants
       "constraints": { "requires_human_approval": ["appeal"] }
     }
   ],
@@ -237,7 +274,27 @@ questions 2 and 3.
 }
 ```
 
-**Notes on four deliberate choices.**
+**Actions.** `read`, `draft`, `submit`, `draft-appeal`, `appeal`, `monitor`,
+`correspond`. Each requires the corresponding card capability in §5, and a
+delegation naming an action the card does not carry is rejected.
+
+**Preparing is not filing.** `draft` and `submit` are two actions because
+preparing an application is reversible and private and filing it is neither.
+`draft-appeal` and `appeal` are two actions for exactly the same reason, and for
+one more: filing an appeal starts or forfeits a clock. A person who authorises an
+agent to draft an appeal has not authorised it to lodge one, and a conforming
+implementation must not let a card carrying only `draft:appeal` file anything.
+This was wrong until v0.3; see the changelog.
+
+**Notes on five deliberate choices.**
+
+`delegate.aic_thumbprint` and `delegate.cnf_thumbprint` are the binding, and a
+verifier must **recompute both from what was actually presented** and compare,
+rather than checking that the fields are there. A delegation carried alongside a
+different agent's Agent Identity Card, or presented by a key other than the one
+it was granted to, is rejected. Where a verifier has no card to compare against,
+it has not checked the binding and must reject on that basis rather than proceed.
+The two credentials are separable; the authority between them is not.
 
 `delegator.sub` is pairwise. A person delegating to one agent across three
 programs must not be correlatable across those three verifiers by the identifier
@@ -279,14 +336,14 @@ So a delegation carries two things where v0.1 carried one.
 describes the shape of an interaction. None describes a subject, a programme, a
 condition, or a circumstance.
 
-| Capability | What the verifier is shown |
-|---|---|
-| `read:public-information` | Look up publicly published information |
-| `submit:form` | Submit a form and track its status |
-| `provide:documents` | Provide documents that were asked for |
-| `track:status` | Check where something has got to |
-| `request:review` | Ask for a decision to be looked at again |
-| `correspond:administrative` | Exchange routine correspondence about a file |
+| Capability | What the verifier is shown | Actions it permits |
+|---|---|---|
+| `read:public-information` | Look up publicly published information | `read` |
+| `submit:form` | Submit a form and track its status | `draft`, `submit` |
+| `provide:documents` | Provide documents that were asked for | `draft`, `submit` |
+| `track:status` | Check where something has got to | `monitor` |
+| `request:review` | Ask for a decision to be looked at again | `draft-appeal`, `appeal` |
+| `correspond:administrative` | Exchange routine correspondence about a file | `correspond` |
 
 **`purpose`** is the person's own sentence, in their own language. It is what
 they read at the moment of granting. It is selectively disclosable and **withheld
@@ -455,6 +512,43 @@ Comments to `trust@thekindredagency.com`.
 ---
 
 ## Changelog
+
+### v0.3 — 13 August 2026
+
+**What changed in 0.3, and why.**
+
+Everything here was found by building the appeal path, not by reading this
+document. The specification had been read several times, including while writing
+the threat model, and none of these came out of a reading. They came out of
+sitting down to write the code that lets a person appeal a refusal and finding
+that the code the document described did the wrong thing.
+
+- **Appealing is now two actions, not one.** `draft-appeal` requires
+  `draft:appeal` and `appeal` requires `submit:appeal`, mirroring `draft` and
+  `submit` for applications. Until now, `appeal` needed only `draft:appeal`,
+  which meant a person who authorised an agent to *prepare* an appeal had
+  silently authorised it to *file* one. Filing an appeal cannot be taken back and
+  it starts or forfeits a clock. Applications had this right from v0.1; appeals
+  did not, and nobody noticed until the path was built.
+- **`submit:appeal` is in the specification.** It was already in the reference
+  implementation's capability list and appeared nowhere in this document. §5 now
+  carries the full card capability vocabulary as a table, so code and
+  specification can be checked against each other rather than assumed to agree.
+- **The binding is now enforced, and this document says so.** §6 requires a
+  verifier to recompute `aic_thumbprint` and `cnf_thumbprint` from the card and
+  key actually presented and compare them. They were required fields that nothing
+  compared to anything, which meant a delegation could be presented alongside a
+  different agent's card and pass. This is T3.3 in the threat model, and it is
+  closed.
+- **`agent.id` is not "non-correlating", and §5 no longer says it is.** It is
+  stable and opaque, and it is a lifetime correlator for the person the agent
+  acts for. The correction points at `knowledge-base/kya/PRIVACY-GAP.md` rather
+  than restating half of it.
+
+**Migration from v0.2.** A v0.2 delegation granting `appeal` is not conforming
+under v0.3 unless the card carries `submit:appeal`. This is the intended
+direction of failure: an implementation that is refused finds out that its cards
+were granting more than the person agreed to.
 
 ### v0.2 — 10 August 2026
 
