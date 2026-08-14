@@ -370,7 +370,14 @@ if (vAppeal.adc.purpose === undefined) {
 }
 
 // The narrower governs here exactly as it does for the application.
-adc.validate({ ...appeal, purpose_commitment: 'x', purpose: 'Please keep working on my file now that the letter has come.' }, { aic: card })
+//
+// Named rather than written inline as 'x'. This line is demonstrating a
+// rejection, so the commitment is deliberately not the real one — but an
+// anonymous literal here is indistinguishable from the 13 August thumbprint bug,
+// both to a reader and to the check in test/no-fake-constants.test.js. A wrong
+// value on purpose should say so.
+const A_COMMITMENT_SHE_NEVER_SIGNED = 'deliberately-not-the-real-commitment';
+adc.validate({ ...appeal, purpose_commitment: A_COMMITMENT_SHE_NEVER_SIGNED, purpose: 'Please keep working on my file now that the letter has come.' }, { aic: card })
   .problems.filter((p) => p.includes('purpose sentence'))
   .forEach((p) => no(p));
 ok('the narrower of the sentence and the grant governs the appeal too');

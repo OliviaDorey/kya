@@ -17,6 +17,8 @@ export * as revocation from './revocation.js';
 export * as chain from './chain.js';
 export * as register from './register.js';
 export * as pairwise from './pairwise.js';
+export * as conformance from './conformance.js';
+export * as wallet from './wallet.js';
 export * as federation from './federation.js';
 export * as alberta from './alberta.js';
 

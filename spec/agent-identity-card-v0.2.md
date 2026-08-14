@@ -1,7 +1,7 @@
 # The Agent Identity Card and the Delegation Credential
 
-**Version 0.4 — 14 August 2026.** Supersedes v0.3 of 13 August 2026, which
-superseded v0.2 of 10 August 2026 and v0.1 of 6 August 2026.
+**Version 0.5 — 14 August 2026.** Supersedes v0.4 of the same day, which
+superseded v0.3 of 13 August, v0.2 of 10 August and v0.1 of 6 August 2026.
 
 The filename still says v0.2. It is left alone deliberately: this file is the
 living specification and several documents outside this repository link to it by
@@ -9,7 +9,7 @@ name. The version above governs.
 
 Editor: Olivia Dorey, The Kindred Agency, Bridgewater, Nova Scotia.
 Status: **draft, implemented and tested.** Every *must* in this document is
-enforced by `../src/` and defended by a named test in `../test/`, 108 of them.
+enforced by `../src/` and defended by a named test in `../test/`, 129 of them.
 The status line read "not implemented" for four days after that stopped being
 true, which is the same class of defect as a document claiming a feature that
 does not exist, and it is now checked in CI rather than remembered.
@@ -573,6 +573,56 @@ Comments to `trust@thekindredagency.com`.
 ---
 
 ## Changelog
+
+### v0.5 — 14 August 2026
+
+**A pairwise subject on its own was decorative, and this version says so.**
+
+v0.4 made `delegator.sub` per-verifier. A conformance probe written the same day
+then compared two people across three offices and found the subject was the
+**only** thing that varied: nine other always-disclosed fields were constant
+across verifiers and unique to the person, so any two offices could still join
+their files exactly. A correlation moved to the neighbouring field is a
+correlation you still have.
+
+- **`conformance.js` is new**, and is given away with the rest of the tests per
+  §B of [revocation-and-chains.md](revocation-and-chains.md).
+  `probeUnlinkability` mints a set for **two different people** across several
+  verifiers and reports only fields that are constant across verifiers *and*
+  differ between people. The differential is what separates a correlator like
+  `purpose_commitment` from a constant like `cnf.jwk.kty`, which is `"EC"` on
+  every credential ever issued. Without it the first run returned eighteen
+  findings, about half of them noise.
+- **`wallet.js` is new** and mints an unlinkable set. Four of the nine
+  correlators were data hygiene and are fixed in it: a fresh salt per credential
+  so one sentence does not produce one commitment everywhere, a per-verifier
+  reference to the single consent act, `captured_at` rounded to the day because a
+  millisecond is a fingerprint, and a per-credential revocation URI.
+- **The other five are structural, and unlinkability now has a stated price.**
+  `iss`, `cnf.jwk`, `delegate.cnf_thumbprint`, `delegate.aic_thumbprint` and
+  `delegate.agent_id` are constant because the person has one agent, holding one
+  key, carrying one card. Nothing at field level fixes that. **A conforming
+  unlinkable deployment needs a distinct agent key and a distinct Agent Identity
+  Card per verifier**, so three offices means three cards and three keys, one
+  consent act, and one grant as the person sees it. `wallet.describeCost()`
+  states the bill, because a privacy property whose cost is hidden gets removed
+  by whoever discovers the cost later. Sharing a card to reduce it reverts the
+  property entirely rather than weakening it a little.
+- **`probePairwiseHonesty` answers the question no verifier can.** A wallet is
+  asked for subjects addressed to several verifiers; if any two match it is
+  reusing one identifier and stamping each copy with the right audience. That
+  closes threat model item 22 at assessment time and not at runtime, which is
+  why the retained asset is an operated register that can re-test unannounced
+  rather than a document.
+- **`agent.id` and §5's correlation note are unchanged and still open.** A
+  per-verifier agent alias is what makes the structural half work, and this
+  version demonstrates one in the test suite rather than mandating a scheme.
+  `PRIVACY-GAP.md` remains the honest account.
+
+**Migration from v0.4.** Additive. A wallet that keeps issuing one credential at
+a time still conforms and is still linkable, which is the state every deployment
+is in today. `issueSet()` is the path to the stronger property and it is opt-in
+because it costs real money at the issuer.
 
 ### v0.4 — 14 August 2026
 
