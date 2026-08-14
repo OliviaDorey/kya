@@ -62,6 +62,39 @@ jobs:
           });
           "
 
+      # The status line read "draft, not implemented" for four days against 52
+      # passing tests, and nothing caught it because every drift check we had
+      # compared shapes rather than claims. A document asserting that a built
+      # thing is unbuilt is the same defect as one asserting an unbuilt thing
+      # works: both are a sentence nobody tested. This is the test.
+      - name: The spec does not call built things unbuilt
+        working-directory: kya
+        run: |
+          node -e "
+          const fs = require('fs');
+          const problems = [];
+          const spec = fs.readFileSync('spec/agent-identity-card-v0.2.md','utf8');
+          if (/Status:[^\n]*not implemented/.test(spec)) {
+            problems.push('the status line says \"not implemented\" and the test suite is green');
+          }
+          // Each pair is [claim the spec must no longer make, module that disproves it].
+          const built = [
+            [/chain(ed|ing)?[^.\n]{0,60}(is |are )?(specified and )?not (implemented|built)/i, 'src/chain.js'],
+            [/revocation[^.\n]{0,60}(is |are )?(specified and )?not (implemented|built)/i, 'src/revocation.js'],
+          ];
+          for (const [claim, module] of built) {
+            if (claim.test(spec) && fs.existsSync(module)) {
+              problems.push('the spec says this is not built, and ' + module + ' exists: ' + spec.match(claim)[0].trim());
+            }
+          }
+          if (problems.length) {
+            console.error('::error::The specification understates what the code does.');
+            problems.forEach(p => console.error('  - ' + p));
+            process.exit(1);
+          }
+          console.log('The spec does not claim a built thing is unbuilt.');
+          "
+
       - name: The privacy commitment still holds
         working-directory: kya
         run: |

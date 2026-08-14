@@ -1,14 +1,18 @@
 # The Agent Identity Card and the Delegation Credential
 
-**Version 0.3 — 13 August 2026.** Supersedes v0.2 of 10 August 2026, which
-superseded v0.1 of 6 August 2026.
+**Version 0.4 — 14 August 2026.** Supersedes v0.3 of 13 August 2026, which
+superseded v0.2 of 10 August 2026 and v0.1 of 6 August 2026.
 
 The filename still says v0.2. It is left alone deliberately: this file is the
 living specification and several documents outside this repository link to it by
 name. The version above governs.
 
 Editor: Olivia Dorey, The Kindred Agency, Bridgewater, Nova Scotia.
-Status: **draft, not implemented.** Circulated for technical review before code is written.
+Status: **draft, implemented and tested.** Every *must* in this document is
+enforced by `../src/` and defended by a named test in `../test/`, 91 of them.
+The status line read "not implemented" for four days after that stopped being
+true, which is the same class of defect as a document claiming a feature that
+does not exist, and it is now checked in CI rather than remembered.
 
 ---
 
@@ -313,12 +317,30 @@ bug in whoever built the chain.
 complete. This is where an approval architecture becomes cryptographic rather
 than a promise in an interface.
 
-**Chaining.** Where a delegation must pass through an intermediary, for example a
-navigator acting with a client, chain per Delegate SD-JWT and mirror the chain in
-the RFC 8693 `act` claim at runtime so downstream services see the full path.
-Until that draft stabilises, use an explicit `delegation_chain` array of
-thumbprints. Both approaches are transitional and the claim set does not depend
-on which wins.
+**Chaining.** Built as of v0.4 and specified in full in
+[revocation-and-chains.md](revocation-and-chains.md) §C, which this section now
+defers to rather than restating.
+
+The short form. A chain is an ordered set of delegations, each a credential in
+its own right, each carrying a `chain` claim of `{ depth, parent_thumbprint,
+root_thumbprint }`. Scope narrows on six axes and never widens, and a widening
+link is **rejected, not clamped**. Depth is capped at **three hops**. The
+property that makes it work across an organisational boundary is that a chain
+carries its own key path:
+
+> link *n+1* must be signed by the key committed to in link *n*'s
+> `delegate.cnf_thumbprint`.
+
+So a verifier trusts exactly one key from outside the chain — the issuer of link
+0, the person's wallet, whose standing comes from the federation anchor — and
+authenticates every later hop with material it has already verified. It needs no
+prior relationship with the principal or with any intermediary.
+
+Mirroring the chain in the RFC 8693 `act` claim at runtime remains the right
+thing to do so downstream services see the full path, and is unchanged. The
+Delegate SD-JWT draft is no longer on the critical path: nothing in the claim set
+depends on it, and if it or DIF's KYA-OS wins, the chain claim is the only thing
+that has to change.
 
 ---
 
@@ -395,6 +417,30 @@ structure.** A conforming deployment must provide:
 Short expiry does most of the work. The service exists for the case where short
 is not short enough, which is the case that matters to someone who has just
 realised they should not have granted something.
+
+**Built as of v0.4**, along with four things this section did not previously
+reach. All four are specified in [revocation-and-chains.md](revocation-and-chains.md),
+which enumerates the five failure cases revocation must cover and is honest about
+the ones it cannot.
+
+- **Who else may pull the switch.** "Only the person can revoke" is useless in
+  the case that matters most: the agent behaving inside its scope against the
+  person's interest, seen by a relying party while the person knows nothing about
+  it. A relying party may now **suspend** — scoped to itself, reversible, and
+  **only the person may reinstate**. A relying party may never revoke, because
+  one office permanently ending a person's authority to be helped is an
+  abandonment vector wearing a safety mechanism's clothes.
+- **Cascade.** Revoking a link stops every delegation below it and none above it.
+  Revoking an Agent Identity Card stops every delegation held by its key, because
+  when the holder key is compromised the unit of harm is the agent, not the grant.
+- **The issuer's own compromise, which a status list structurally cannot report.**
+  A status list is signed by the issuer, so a compromised issuer publishes one
+  saying everything is fine. The switch has to be held by a party who is not the
+  subject. That is a trust register, it is out of band, and §7 could not have
+  been completed without admitting it.
+- **A continuation on every stop.** Revocation that strands somebody mid-application
+  is a failure of this specification, not a success of it. Every stop returns what
+  stopped, what is unaffected, who did it, and what the person can do next.
 
 **Availability commitment.** Revocation infrastructure must not have a cliff. See
 §9.2, because this is where the sunset commitment and the safety obligation meet
@@ -494,8 +540,23 @@ as source escrow.
 5. What does a delegation mean when the delegator loses capacity? Guardianship
    and power of attorney are the hardest case and are deliberately out of scope
    for v0.1. They cannot stay out of scope for v1.
-6. Does DIF KYA-OS, once voted, subsume §5? If it does, the right response is to
-   adopt it and contribute §6 and §7, which it does not appear to cover.
+6. Does DIF KYA-OS, once voted, subsume §5? **The v0.1–v0.3 wording of this
+   question was wrong and is corrected here rather than quietly edited.** It said
+   KYA-OS "does not appear to cover" §6 and §7. It covers both: delegation is
+   central to it, chains are DAGs, each hop narrows its parent's scopes, they are
+   rooted at an accountable Responsible Party, and revocation is specified via
+   StatusList2021. That is the same shape as §6 and
+   [revocation-and-chains.md](revocation-and-chains.md) §C, reached
+   independently, and the agreement is worth more than the novelty would have
+   been. The real divergence is format — W3C VC 1.1 and `Ed25519Signature2020`
+   against SD-JWT VC and Key Binding JWT — and the real gap is a **trust
+   register**: KYA-OS publishes conformance levels and names no party who decides
+   a deployment meets them, and no way to withdraw an issuer whose own signature
+   is in doubt. The right response is an SD-JWT VC binding of KYA-OS rather than
+   a rival specification. Two things would need work and both are additive:
+   StatusList2021 publishes no `ttl`, which the fail-closed rule needs something
+   to fail closed against, and a two-state list cannot express a scoped
+   suspension.
 
 ---
 
@@ -512,6 +573,39 @@ Comments to `trust@thekindredagency.com`.
 ---
 
 ## Changelog
+
+### v0.4 — 14 August 2026
+
+**Chaining and revocation stop being the two things this document specified and
+nobody had built.** Written against two criticisms rather than against review
+comments, which is the second time that has been the more productive order.
+
+- **§6 chaining is built**, and this section now defers to
+  [revocation-and-chains.md](revocation-and-chains.md) §C rather than restating
+  it. Six narrowing axes, three-hop cap, and a chain that carries its own key
+  path so a relying party with no prior relationship to the person can verify the
+  whole thing from one federation anchor. The Delegate SD-JWT draft expiring in
+  October is no longer on the critical path.
+- **§7 revocation gains the four things it did not reach**: who other than the
+  principal may pull the switch, cascade down a chain and across a card's
+  delegations, the issuer's own compromise, and a continuation on every stop.
+- **A relying party may suspend and may never revoke.** This is the answer to
+  "the credential proves authority, not conduct", and it is deliberately smaller
+  than the criticism. It does not make an agent behave. It lets the party who can
+  see the misbehaviour stop it without the person present, and stops that party
+  being able to take the person's authority away.
+- **The status line was wrong for four days** and said "not implemented" against
+  52 passing tests. Corrected, and now checked in CI, because the lesson from
+  10–13 August was that no document claiming product behaviour had a test that
+  would fail when the claim went stale.
+- **§10 question 6 was factually wrong about DIF KYA-OS** and is corrected in
+  place with the correction visible rather than edited away. KYA-OS does cover
+  delegation and does specify revocation. The gap it leaves is a trust register.
+
+**Migration from v0.3.** None required. Everything in v0.4 is additive: a
+delegation with no `chain` claim is a single-hop chain and verifies exactly as it
+did. A deployment that wants suspension must publish a **two-bit** status list,
+because a one-bit list can say revoked or not revoked and nothing in between.
 
 ### v0.3 — 13 August 2026
 

@@ -12,7 +12,7 @@ than we did.
 
 ```bash
 npm install
-npm test              # 52 tests, each named after the promise it defends
+npm test              # 91 tests, each named after the promise it defends
 npm run demo          # end to end, no network
 npm run verify:alberta   # talks to Alberta's live trust anchor
 ```
@@ -156,11 +156,29 @@ rule cannot drift between callers.
 
 ## Status
 
-The credentials, the status list, the rule basis, and the federation half are
-built and tested. Two things are specified and not built: the **citizen-facing
-revocation service** in section 7, which is a running service rather than a
-library, and **chained delegation** through an intermediary such as a navigator,
-which waits on the Delegate SD-JWT draft stabilising.
+The credentials, the status list, the rule basis, the federation half, the
+revocation service and **chained delegation** are built and tested.
+
+Chaining and chain-aware revocation landed 14 August 2026, with the design note
+at [spec/revocation-and-chains.md](spec/revocation-and-chains.md). It answers two
+criticisms directly: that a credential proves authority and not conduct, and that
+nothing here governed agents crossing an organisational boundary. The answers are
+smaller than the criticisms and the note says how, at "What this still does not
+solve", which is written for a hostile reviewer rather than for us.
+
+The short version. A chain carries its own key path — link *n+1* is signed by the
+key link *n* committed to — so a relying party with no prior relationship to the
+person can verify the whole thing from a single federation anchor. Scope narrows
+on six axes and a widening link is rejected rather than clamped. Depth is capped
+at three hops. Revoking a link stops everything below it and nothing above it;
+revoking a card stops every delegation held by its key. And a relying party that
+sees an agent misbehaving inside its grant can now **suspend** it — stopping it at
+that party, reversibly, with only the person able to reinstate — because a
+mechanism that lets one office permanently end a person's authority to be helped
+would be an abandonment vector wearing a safety mechanism's clothes.
+
+What is still not built: a running deployment of any of it. This is a library
+with tests, not a service with an availability target.
 
 One known unsolved problem, written down rather than deferred:
 [the privacy gap](../knowledge-base/kya/PRIVACY-GAP.md). A stable agent
