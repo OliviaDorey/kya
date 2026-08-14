@@ -65,7 +65,7 @@ const card = {
     contact: 'trust@thekindredagency.com',
     redress_uri: 'https://thekindredagency.com/redress',
   },
-  model: { disclosed: true, family: 'claude-opus', version: '5', hosted_in: 'CA' },
+  model: { disclosed: true, family: 'claude-opus', version: '5', hosted_in: 'CA', residency_basis: 'asserted' },
   capabilities: [
     'read:program-information',
     'draft:application',

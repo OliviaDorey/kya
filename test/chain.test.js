@@ -43,7 +43,7 @@ const rootCard = {
   agent: { id: AGENT_A, name: 'Steward', version: '1.0.0' },
   builder: { legal_name: 'The Kindred Agency Inc.', jurisdiction: 'CA-NS', registry_id: '1', uri: 'https://thekindredagency.com' },
   accountable: { role: 'CTO', contact: 'trust@thekindredagency.com', redress_uri: 'https://thekindredagency.com/redress' },
-  model: { disclosed: true, family: 'claude-opus', version: '5', hosted_in: 'CA' },
+  model: { disclosed: true, family: 'claude-opus', version: '5', hosted_in: 'CA', residency_basis: 'asserted' },
   capabilities: ['read:program-information', 'draft:application', 'submit:application', 'monitor:status'],
   conduct: { discloses_ai: 'always', acts_without_approval: false, retains_after_revocation: 'audit-record-only' },
   status: { status_list: { uri: 'https://status.agentcredential.ca/aic', idx: 1 } },

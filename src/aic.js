@@ -20,6 +20,20 @@ import { issue as sdIssue, verify as sdVerify, thumbprint } from './sdjwt.js';
 
 export const AIC_VCT = 'https://agentcredential.ca/aic/v1';
 
+/**
+ * How a residency claim is known. Ordered weakest to strongest, and a verifier
+ * is entitled to treat them differently.
+ *
+ *   asserted     the operator says so, and nothing backs it
+ *   contractual  the model provider is contractually bound to the region
+ *   attested     a third party has assessed it and can be held to the finding
+ *
+ * "asserted" is permitted rather than banned, for the same reason
+ * model.disclosed may be false: an honest weak claim is worth more than a
+ * missing one, and banning it only produces stronger words for the same fact.
+ */
+export const RESIDENCY_BASIS = ['asserted', 'contractual', 'attested'];
+
 export const SELECTIVELY_DISCLOSABLE = ['model', 'assurance'];
 export const ALWAYS_DISCLOSED = ['agent', 'accountable', 'conduct', 'capabilities', 'cnf', 'status', 'builder'];
 
@@ -68,6 +82,31 @@ export function validate(card) {
     problems.push('model is required; state disclosed:false rather than omitting it');
   } else if (card.model.disclosed !== false && !card.model.family) {
     problems.push('model.family is required when model.disclosed is not false');
+  }
+
+  // `model.hosted_in` must say how it is known, on the same principle as
+  // rule_basis: a claim may not wear the clothes of a verified fact.
+  //
+  // This is the field a procurement reviewer tests first, because it is the one
+  // that decides whether a jurisdiction can use the thing at all. A card
+  // presented to a caseworker reading "hosted in CA" asserts something specific
+  // about where the person's words were sent, and until v0.5 nothing in this
+  // library checked it, nothing recorded how it was established, and a verifier
+  // had no way to tell a contractual commitment from a hopeful string. Audit
+  // finding, 14 August 2026, prompted by finding a sibling product asserting
+  // Canadian handling while calling an American inference endpoint.
+  if (card.model?.hosted_in !== undefined) {
+    if (!/^[A-Z]{2}$/.test(card.model.hosted_in)) {
+      problems.push('model.hosted_in must be an ISO 3166-1 alpha-2 country code, e.g. "CA"');
+    }
+    if (!RESIDENCY_BASIS.includes(card.model.residency_basis)) {
+      problems.push(
+        `model.hosted_in is claimed without a model.residency_basis saying how it is known. ` +
+          `One of: ${RESIDENCY_BASIS.join(', ')}. A residency claim nobody can weigh is the ` +
+          'field a procurement reviewer tests first, and "we say so" and "our provider is ' +
+          'contractually bound" are not the same assurance.',
+      );
+    }
   }
 
   if (!Array.isArray(card.capabilities) || card.capabilities.length === 0) {

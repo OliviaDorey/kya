@@ -142,7 +142,8 @@ to a delegation. Answers question 1.
     "disclosed": true,
     "family": "claude-opus",
     "version": "5",
-    "hosted_in": "CA"
+    "hosted_in": "CA",
+    "residency_basis": "asserted"          // asserted | contractual | attested. §5.1
   },
 
   "capabilities": [                             // the outer bound; a delegation narrows it
@@ -195,6 +196,31 @@ narrows. An unknown value is a typo, not a feature, and does not verify.
 
 Preparing and filing are separate capabilities in both directions, applications
 and appeals alike. See §6.
+
+**On `model.hosted_in`, and why it carries a basis.** A card presented to a
+caseworker reading "hosted in CA" asserts something specific about where the
+person's words were sent, and it is the field a procurement reviewer tests
+first, because it decides whether a jurisdiction can use the thing at all. So it
+may not travel alone: `residency_basis` states how the claim is known, on the
+same principle as `rule_basis` in the Authoritative Rules Commitment — a claim
+may not wear the clothes of a verified fact.
+
+| Basis | Meaning |
+|---|---|
+| `asserted` | the operator says so, and nothing backs it |
+| `contractual` | the model provider is contractually bound to the region |
+| `attested` | a third party has assessed it and can be held to the finding |
+
+`asserted` is permitted rather than banned, for the same reason
+`model.disclosed` may be false: an honest weak claim is worth more than a
+missing one, and banning it only produces stronger words for the same fact. A
+verifier is entitled to treat the three differently, and should.
+
+**This was found by auditing a sibling product**, not by reading this document:
+a Kindred product was telling people their data was subject to Canadian law
+while sending every message to an American inference endpoint. Nothing in this
+library checked the equivalent claim, and nothing recorded how it was
+established.
 
 **On `agent.id` and correlation.** The identifier is stable and opaque. It is
 **not** non-correlating, and v0.2 of this document said it was. An agent that

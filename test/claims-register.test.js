@@ -113,6 +113,15 @@ const CLAIMS = [
       pairwise.boundToVerifier({ sub: 'pw:a', pairwise: true, sub_audience: 'https://a.ca' }, 'https://b.ca').ok === false,
   },
   {
+    file: 'spec/agent-identity-card-v0.2.md',
+    sentence: 'it may not travel alone: `residency_basis` states how the claim is known',
+    holds: async () => {
+      const aic = await import('../src/aic.js');
+      const card = { vct: aic.AIC_VCT, model: { disclosed: true, family: 'x', hosted_in: 'CA' } };
+      return aic.validate(card).problems.some((p) => p.includes('residency_basis'));
+    },
+  },
+  {
     file: 'src/wallet.js',
     sentence: 'Unlinkability requires a distinct agent key and a distinct Agent Identity Card',
     holds: () => wallet.describeCost(3).identity_cards === 3 && wallet.describeCost(3).agent_keys === 3,
