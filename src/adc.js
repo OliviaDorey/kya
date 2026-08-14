@@ -74,8 +74,20 @@ const ACTION_REQUIRES = {
  */
 const PURPOSE_HINTS = {
   submit: /\b(submit|apply|application|file|lodge)\b/i,
-  'draft-appeal': /\b(appeal|review|reconsider|challenge)\b/i,
-  appeal: /\b(appeal|review|reconsider|challenge)\b/i,
+  // Both appeal actions mention an appeal, so a shared pattern let a purpose
+  // reading "draft an appeal for me to look at" satisfy the hint for the action
+  // that actually files one. That is the exact confusion v0.3 split the actions
+  // to prevent, and the purpose guard could not see it. Review finding,
+  // 13 August 2026.
+  //
+  // Filing is therefore defined by what the sentence does NOT say. Testing for a
+  // filing verb fails in both directions: "Appeal it on my behalf" names no verb
+  // and plainly means file, while "for me to look at before anything is filed"
+  // contains one and plainly means do not. So the filing hint asks for an appeal
+  // and refuses any sentence that scopes itself to preparation.
+  'draft-appeal': /\b(appeal|reconsider|reconsideration|review|challenge)\b/i,
+  appeal:
+    /^(?!.*\b(?:draft|drafts|drafted|drafting|prepare|prepares|prepared|preparing)\b)(?=.*\b(?:appeal|reconsider|reconsideration|review|challenge)\b)/is,
   correspond: /\b(correspond|write|contact|communicate|speak|reply)\b/i,
 };
 
@@ -334,8 +346,20 @@ export async function bindingBreaches(adc, { aic, presentedCard, aicThumbprint }
   // The card and the delegation must be held by the same key. Without this, two
   // separately valid credentials belonging to two different agents could be
   // presented together.
-  if (aic?.cnf?.jwk && presentedKey) {
-    const cardKey = await thumbprint(aic.cnf.jwk);
+  //
+  // This was gated on `aic?.cnf?.jwk` until the review of 13 August 2026, which
+  // meant a caller following the documented `aicThumbprint` route got checks 1
+  // and 2 and skipped this one in silence. Checking two of three bindings and
+  // reporting no breach is the failure this whole function was written to end.
+  const cardKeyJwk = aic?.cnf?.jwk;
+  if (!cardKeyJwk) {
+    out.push(
+      'the holder binding could not be checked: no Agent Identity Card claims were supplied, ' +
+        'or the card carries no cnf.jwk, so there is nothing to compare the delegation holder ' +
+        'against. Pass the verified card as "aic". An unchecked binding is a failed binding.',
+    );
+  } else if (presentedKey) {
+    const cardKey = await thumbprint(cardKeyJwk);
     const delegationKey = await thumbprint(presentedKey);
     if (cardKey !== delegationKey) {
       out.push(
@@ -430,6 +454,20 @@ export async function verify(presented, {
   nonce,
   now = Date.now(),
 }) {
+  // The card is not optional here. validate() skips attenuation when it has no
+  // card to narrow against, and bindingBreaches() cannot compare holders without
+  // one, so a verify() call with no `aic` was quietly checking neither the
+  // headline invariant of the specification nor the third of three bindings, and
+  // returning success. Review finding, 13 August 2026.
+  if (!aic) {
+    throw new Error(
+      'verify requires the Agent Identity Card as "aic". Without it, attenuation is not ' +
+        'checked and the card-to-delegation holder binding is not checked. Verifying a ' +
+        'delegation against no card is not a weaker check, it is a different and much ' +
+        'smaller one, and it must not report success.',
+    );
+  }
+
   // The issuer of a delegation is the person's wallet, so the "issuer key" here
   // is the wallet's key. Naming it walletKey at the boundary keeps callers from
   // reaching for the agent operator's key by habit.

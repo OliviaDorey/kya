@@ -39,6 +39,11 @@ const baseCard = () => ({
   capabilities: ['read:program-information', 'draft:application', 'submit:application', 'draft:appeal', 'submit:appeal'],
   conduct: { discloses_ai: 'always', acts_without_approval: false, retains_after_revocation: 'audit-record-only' },
   status: { status_list: { uri: 'https://status.agentcredential.ca/aic', idx: 1 } },
+  // sdjwt sets cnf from holderJwk at issue time, so every card a verifier ever
+  // sees carries one. This fixture was the pre-issuance claim set and did not,
+  // which is why the holder binding had nothing to compare against and passed
+  // in silence. The fixture was the bug, not the check. Review, 13 Aug 2026.
+  cnf: { jwk: agentJwk },
 });
 
 /**
