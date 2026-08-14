@@ -12,7 +12,7 @@ than we did.
 
 ```bash
 npm install
-npm test              # 35 tests, each named after the promise it defends
+npm test              # 52 tests, each named after the promise it defends
 npm run demo          # end to end, no network
 npm run verify:alberta   # talks to Alberta's live trust anchor
 ```
@@ -86,7 +86,7 @@ Schema annotation. Their base schema is titled "SD-JWT Schema (RFC-9901)", so th
 are tracking the ratified RFC and will likely converge. Everything Alberta-specific
 is behind `src/alberta.js` so it can be deleted when they do.
 
-## The four properties this enforces in code
+## The properties this enforces in code
 
 These are the reason the package exists. Each is a rule the specification states
 and this implementation refuses to break, rather than a guideline an operator is
@@ -99,6 +99,18 @@ is `always`. A card carrying anything else does not issue and does not verify.
 `agent` and `status` are never selectively disclosable. Asking to hide one throws
 at issue time. A verifier must never have to ask who is answerable for this
 thing.
+
+**A delegation belongs to one card and one key.** `delegate.aic_thumbprint` and
+`delegate.cnf_thumbprint` are recomputed at verification from the card and the
+key actually presented, and compared. A delegation carried alongside a different
+agent's Agent Identity Card is refused, and so is a verifier that was given no
+card to compare against, because an unchecked binding is not a passed one. Until
+v0.3 both fields were required and neither was ever compared to anything.
+
+**Preparing is not filing.** `draft`/`submit` and `draft-appeal`/`appeal` are
+four actions, not two. A card carrying only `draft:appeal` can prepare an appeal
+and cannot lodge one. Filing is irreversible, and for an appeal it starts or
+forfeits a clock.
 
 **Authority narrows and never widens.** A delegation may not grant an action the
 Agent Identity Card does not hold, and where the human-authored `purpose`

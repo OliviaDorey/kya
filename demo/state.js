@@ -54,6 +54,7 @@ export async function boot() {
       'draft:application',
       'submit:application',
       'draft:appeal',
+      'submit:appeal',
       'monitor:status',
     ],
     conduct: { discloses_ai: 'always', acts_without_approval: false, retains_after_revocation: 'audit-record-only' },
@@ -91,7 +92,7 @@ export async function boot() {
       {
         type: 'ca_public_service_request',
         capability: 'request:review',
-        actions: ['appeal'],
+        actions: ['draft-appeal', 'appeal'],
         constraints: { requires_human_approval: ['appeal'] },
       },
     ],

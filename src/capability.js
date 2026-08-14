@@ -48,7 +48,9 @@ export const CAPABILITY_ACTIONS = {
   'submit:form': ['draft', 'submit'],
   'provide:documents': ['draft', 'submit'],
   'track:status': ['monitor'],
-  'request:review': ['appeal'],
+  // Drafting an appeal and filing one are separate actions, exactly as they are
+  // for a form. Filing is the irreversible half and needs its own grant.
+  'request:review': ['draft-appeal', 'appeal'],
   'correspond:administrative': ['correspond'],
 };
 

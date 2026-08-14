@@ -151,6 +151,8 @@ export function caseworker({ card, explained, adcClaims, statusLine, presentatio
     <li>The agent proved it holds the key the credentials were issued to</li>
     <li>This presentation was made to you specifically and cannot be replayed elsewhere</li>
     <li>The delegation grants no more than the agent's own card allows</li>
+    <li>The delegation was granted against <em>this</em> card and <em>this</em> key, and both
+        thumbprints were recomputed here rather than taken on trust</li>
     <li>Revocation status checked ${esc(statusLine.checked)}; if we could not reach it, this reads "not in force"</li>
   </ul>
 </div>

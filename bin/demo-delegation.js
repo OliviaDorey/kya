@@ -7,6 +7,7 @@
  *   3  the agent presents both to a verifier, with key binding
  *   4  the verifier checks the status list and fails closed if it cannot
  *   5  the agent tries to overreach, and is refused
+ *  5a  the application is refused, and appealing takes a second delegation
  *   6  the person revokes, and gets a receipt
  *
  * No network. Everything is generated in-process so this runs anywhere.
@@ -58,7 +59,14 @@ const card = {
     redress_uri: 'https://thekindredagency.com/redress',
   },
   model: { disclosed: true, family: 'claude-opus', version: '5', hosted_in: 'CA' },
-  capabilities: ['read:program-information', 'draft:application', 'submit:application', 'draft:appeal', 'monitor:status'],
+  capabilities: [
+    'read:program-information',
+    'draft:application',
+    'submit:application',
+    'draft:appeal',
+    'submit:appeal',
+    'monitor:status',
+  ],
   conduct: { discloses_ai: 'always', acts_without_approval: false, retains_after_revocation: 'audit-record-only' },
   assurance: { framework: 'PCTF', level: 'pending', assessed_by: null, assessed_at: null },
   status: { status_list: { uri: AIC_LIST, idx: 4213 } },
@@ -108,19 +116,15 @@ const delegation = {
   // Her sentence, in her words. It names what she is going through, and it
   // never leaves her wallet unless she chooses to show it.
   purpose:
-    'Apply for Assured Income for the Severely Handicapped on my behalf, and appeal if I am refused.',
+    'Apply for Assured Income for the Severely Handicapped on my behalf.',
+  // Submission, and nothing else. She is applying; she has not been refused and
+  // has no reason yet to authorise an appeal. Step 5a is what happens when she does.
   authorization_details: [
     {
       type: 'ca_public_service_request',
       capability: 'submit:form',
       actions: ['draft', 'submit'],
       constraints: { max_submissions: 1, requires_human_approval: ['submit'], valid_until: '2026-09-30' },
-    },
-    {
-      type: 'ca_public_service_request',
-      capability: 'request:review',
-      actions: ['appeal'],
-      constraints: { requires_human_approval: ['appeal'], valid_until: '2026-09-30' },
     },
   ],
   consent: {
@@ -179,10 +183,28 @@ ok(`model withheld this time: ${vCard.card.model === undefined ? 'yes, and the v
 const vDel = await adc.verify(presentedDelegation, {
   walletKey: wallet.publicKey,
   aic: vCard.card,
+  aicThumbprint: vCard.thumbprint,   // recomputed from the card just presented
   audience: AUD,
   nonce: NONCE,
 });
 ok('delegation verified, key-bound to the presenting agent');
+ok('and bound to the card presented with it: both thumbprints recomputed and compared');
+
+// The binding is the reason there are two credentials rather than one. A
+// delegation carried alongside somebody else's card is refused outright.
+const strangersCard = await aic.issue({ card, privateKey: issuer.privateKey, holderJwk: agentJwk });
+try {
+  await adc.verify(presentedDelegation, {
+    walletKey: wallet.publicKey,
+    aic: vCard.card,
+    presentedCard: strangersCard,
+    audience: AUD,
+    nonce: NONCE,
+  });
+  no('a delegation verified against a card it was not granted against. That is a bug.');
+} catch (e) {
+  no(e.message.split('\n')[1].replace(/^\s*-\s*/, '').split('.')[0]);
+}
 say();
 say('  What the CASEWORKER sees:');
 say(capability.explainToVerifier(vDel.adc).split('\n').map((l) => `    ${l}`).join('\n'));
@@ -244,6 +266,108 @@ const leaky = {
 adc.validate(leaky, { aic: card }).problems
   .filter((p) => p.includes('information'))
   .forEach((p) => no(p));
+
+// ─────────────────────────────────────────────────────────── 5a
+rule('5a. The application is refused. Appealing takes a second delegation');
+
+say('  The decision letter says no. She wants to appeal.');
+say(`  The delegation she granted permits: submit ${adc.permits(delegation, 'submit')}, appeal ${adc.permits(delegation, 'appeal')}`);
+no('an appeal is a different capability, not a later step of the same one');
+
+const stretched = {
+  ...delegation,
+  purpose_commitment,
+  authorization_details: [
+    { ...delegation.authorization_details[0], actions: ['draft', 'submit', 'appeal'] },
+  ],
+};
+adc.validate(stretched, { aic: card }).problems
+  .filter((p) => p.includes('only permits'))
+  .forEach((p) => no(p));
+
+// She grants a fresh one. It is granted only because the card already carries
+// draft:appeal and submit:appeal; a delegation can narrow what the card holds and
+// never widen it. Drafting the appeal and filing it are two separate grants, for
+// the same reason drafting a form and submitting it are: filing is irreversible
+// and it starts or forfeits a clock.
+const appeal = {
+  ...delegation,
+  purpose: 'The decision went against me. Appeal it on my behalf and keep me told.',
+  purpose_commitment: undefined,
+  iat: sec,
+  exp: sec + 14 * 86400,
+  authorization_details: [
+    {
+      type: 'ca_public_service_request',
+      capability: 'request:review',
+      actions: ['draft-appeal', 'appeal'],
+      constraints: { requires_human_approval: ['appeal'], valid_until: '2026-12-31' },
+    },
+  ],
+  consent: {
+    record_uri: 'https://wallet.example.ca/consent/44a2',
+    captured_at: new Date(now).toISOString(),
+    language: 'en-CA',
+    method: 'in-app-explicit',
+  },
+  revocation: { revoke_uri: 'https://revoke.agentcredential.ca/d/44a2', citizen_facing: true },
+  status: { status_list: { uri: ADC_LIST, idx: 88118 } },
+};
+
+const { credential: issuedAppeal, salt: appealSalt } = await adc.issue({
+  adc: appeal,
+  aic: card,
+  walletKey: wallet.privateKey,
+  holderJwk: agentJwk,
+});
+ok('second delegation issued, granted only because the card carries draft:appeal and submit:appeal');
+
+// Drafting an appeal is not filing one. A card that may prepare an appeal but was
+// never given submit:appeal cannot lodge it, and finds that out here rather than
+// after the clock has started.
+const drafterOnly = { ...card, capabilities: card.capabilities.filter((c) => c !== 'submit:appeal') };
+adc.validate(appeal, { aic: drafterOnly }).problems
+  .filter((p) => p.includes('submit:appeal'))
+  .forEach((p) => no(p));
+
+const APPEAL_NONCE = 'n-8b21d4';
+const presentedAppeal = await adc.present(issuedAppeal, {
+  audience: AUD,
+  nonce: APPEAL_NONCE,
+  holderKey: agent.privateKey,
+});
+const vAppeal = await adc.verify(presentedAppeal, {
+  walletKey: wallet.publicKey,
+  aic: vCard.card,
+  aicThumbprint: vCard.thumbprint,
+  audience: AUD,
+  nonce: APPEAL_NONCE,
+});
+ok(`appeal delegation verified. It permits appeal ${adc.permits(vAppeal.adc, 'appeal')}, submit ${adc.permits(vAppeal.adc, 'submit')}`);
+ok(`and she can still prove what she consented to: ${capability.verifyPurpose(appeal.purpose, appealSalt, vAppeal.adc.purpose_commitment)}`);
+say();
+say('  What the CASEWORKER sees this time:');
+say(capability.explainToVerifier(vAppeal.adc).split('\n').map((l) => `    ${l}`).join('\n'));
+say();
+if (vAppeal.adc.purpose === undefined) {
+  ok('that she was refused, and what for, never reached the office');
+} else {
+  no('her sentence reached the office. That is a bug.');
+}
+
+// The narrower governs here exactly as it does for the application.
+adc.validate({ ...appeal, purpose_commitment: 'x', purpose: 'Please keep working on my file now that the letter has come.' }, { aic: card })
+  .problems.filter((p) => p.includes('purpose sentence'))
+  .forEach((p) => no(p));
+ok('the narrower of the sentence and the grant governs the appeal too');
+
+// And on a card that was never given the capability, the appeal is refused
+// outright rather than trimmed down to something she did not ask for.
+const cardWithoutAppeal = { ...card, capabilities: card.capabilities.filter((c) => c !== 'draft:appeal') };
+adc.validate(appeal, { aic: cardWithoutAppeal }).problems
+  .filter((p) => p.includes('draft:appeal'))
+  .forEach((p) => no(p));
+ok('refused, not trimmed. The grant is left as written so whoever built it finds out');
 
 // ─────────────────────────────────────────────────────────── 5b
 rule('5b. A tier 3 determination is a malformed credential');
