@@ -100,6 +100,106 @@ export async function fetchStatus(token, { issuerKey, idx, now = Date.now() }) {
 }
 
 /**
+ * The availability commitment. Threat model priority 3.
+ *
+ * The fail-closed rule denies service to every holder at once when status
+ * infrastructure goes down, and until now this repository stated that trade and
+ * published no target, no mirroring requirement, and no specified behaviour
+ * during a known outage. A safety rule whose cost is unbounded and unmeasured is
+ * not a commitment, it is a hope.
+ *
+ * The numbers are deliberately modest and are a floor to be argued up, not a
+ * boast. 99.9% monthly is about 43 minutes down; at that rate somebody is
+ * mid-application during an outage most months.
+ */
+export const AVAILABILITY = {
+  /** Monthly uptime target for published status lists. */
+  TARGET: 0.999,
+  /** Measured from outside, because a service measuring itself measures nothing. */
+  MEASURED: 'external probes against every published mirror, one minute apart',
+  /**
+   * Two independent origins minimum. Mirroring is the only mitigation that
+   * lowers the outage rate without weakening the rule, which is why it is the
+   * requirement and a grace period is not.
+   */
+  MIN_MIRRORS: 2,
+};
+
+/**
+ * Read a status list from several mirrors, and only fail closed once they have
+ * all failed.
+ *
+ * `sources` are thunks so a caller can pass whatever transport it uses. Order is
+ * preserved and the first success wins; the failures are still reported, because
+ * a mirror that is quietly down for a month is how two mirrors become one.
+ */
+export async function fetchStatusMirrored(sources, options) {
+  if (!Array.isArray(sources) || sources.length === 0) {
+    throw new Error('fetchStatusMirrored needs at least one source');
+  }
+  if (sources.length < AVAILABILITY.MIN_MIRRORS) {
+    // A warning rather than a refusal: a single-mirror deployment is
+    // non-conforming and refusing to read it would strand the very people the
+    // rule protects. Surfaced so it cannot be true silently.
+    options = { ...options, underMirrored: true };
+  }
+
+  const failures = [];
+  for (const source of sources) {
+    try {
+      const token = typeof source === 'function' ? await source() : source;
+      const result = await fetchStatus(token, options);
+      return { ...result, reachable: true, mirrorsTried: failures.length + 1, failures, underMirrored: options.underMirrored === true };
+    } catch (err) {
+      failures.push(String(err?.message ?? err));
+    }
+  }
+  return { reachable: false, stale: true, failures, mirrorsTried: sources.length, underMirrored: options?.underMirrored === true };
+}
+
+/**
+ * What happens during a **known** outage, which is the question the threat model
+ * said was unspecified.
+ *
+ * The answer is that nothing changes about the authority: a verifier that cannot
+ * confirm a credential is in force still refuses to act on it, declared outage
+ * or not. There is no grace period and no signed "trust us for an hour" token,
+ * because an attacker who can take down the status list would then have bought
+ * exactly the window they wanted, and the person who revoked in a panic is
+ * relying on the rule being unconditional.
+ *
+ * What changes is what happens to the **person**, and that is the whole point of
+ * specifying it. An outage must not turn into a refusal at a counter. The
+ * relying party falls back to its own non-agent process — the one it had before
+ * any of this existed — and the person is served by a human. Failing closed on
+ * the credential must never mean failing closed on the person.
+ */
+export function outageGuidance({ listUri, since = null, expectedBy = null, redressUri = null }) {
+  return {
+    authority: 'refused',
+    grace_period: null,
+    why:
+      'A verifier that cannot confirm a delegation is in force must treat it as not in force, ' +
+      'whether or not the outage is known. An announced outage that relaxed the rule would hand ' +
+      'an attacker the window, and would break the promise made to whoever has just revoked.',
+    relying_party_must:
+      'Fall back to the process used before agents existed and serve the person directly. ' +
+      'Do not turn anyone away, do not require them to come back later, and do not treat a ' +
+      'failed credential check as a failed applicant.',
+    tell_the_person: [
+      'Something on our side is not working, and it is nothing you did.',
+      'Your agent cannot act for you until it is back.',
+      since ? `It has been down since ${since}.` : null,
+      expectedBy ? `We expect it back by ${expectedBy}.` : 'We do not have a time yet, and we will not guess.',
+      'You can still do this yourself, and the office is required to help you directly in the meantime.',
+      `If this has held something up or a deadline is close, tell us now: ${redressUri ?? 'trust@thekindredagency.com'}`,
+    ].filter(Boolean).join('\n'),
+    status_list: listUri,
+    availability_target: AVAILABILITY.TARGET,
+  };
+}
+
+/**
  * The fail-closed rule, in one place so it cannot drift between callers.
  *
  * A verifier that cannot reach the status list, or reaches a stale one, treats

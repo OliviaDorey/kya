@@ -12,7 +12,7 @@ than we did.
 
 ```bash
 npm install
-npm test              # 91 tests, each named after the promise it defends
+npm test              # 108 tests, each named after the promise it defends
 npm run demo          # end to end, no network
 npm run verify:alberta   # talks to Alberta's live trust anchor
 ```

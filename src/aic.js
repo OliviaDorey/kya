@@ -104,9 +104,79 @@ export async function issue({ card, privateKey, holderJwk, kid, alg = 'ES256', s
   });
 }
 
-export async function verify(presented, { issuerKey, audience, nonce, requireKeyBinding = true, now }) {
-  const result = await sdVerify(presented, { issuerKey, audience, nonce, requireKeyBinding, now });
+/**
+ * Verify an Agent Identity Card.
+ *
+ * Supply **either** `issuerKey`, a key the caller has already established by
+ * some means it can defend, **or** `trust: { anchor }`, in which case the
+ * issuer's key is resolved from the federation: the card's own `iss` is looked
+ * up, its chain to the anchor is validated, and the key comes from the
+ * statement the anchor signs about it rather than from anything the issuer says
+ * about itself.
+ *
+ * Threat model priority 2. Until 14 August 2026 this function verified against
+ * whatever key it was handed and the federation code sat unconnected in the
+ * same repository, which meant a correct-looking signature check that answered
+ * a question nobody had asked.
+ */
+export async function verify(presented, { issuerKey, trust, audience, nonce, requireKeyBinding = true, now }) {
+  if (!issuerKey && !trust?.anchor) {
+    throw new Error(
+      'verify needs either issuerKey, or trust: { anchor } to resolve the issuer key from the ' +
+        'federation. Verifying a credential against no established key is not a weaker check, ' +
+        'it is a different and much smaller one.',
+    );
+  }
+
+  let resolved = null;
+  let key = issuerKey;
+
+  if (!key) {
+    // The card has to be read before it can be verified, so that its `iss` can
+    // be looked up. Nothing from this read is trusted: it selects which key to
+    // check the signature against, and a lie here produces a key that fails.
+    const { decodeJwt } = await import('jose');
+    const claimedIssuer = decodeJwt(presented.split('~')[0])?.iss;
+    if (!claimedIssuer) throw new Error('card carries no iss, so no issuer key can be resolved for it');
+
+    const federation = await import('./federation.js');
+    resolved = await federation.resolveIssuerKeys(trust.anchor, claimedIssuer);
+
+    if (!resolved.pinnedAnchor && trust.requirePinnedAnchor !== false) {
+      throw new Error(
+        `the trust anchor ${trust.anchor.entityId} was fetched without a pin, so resolving a key ` +
+          'through it establishes nothing. Pin the anchor, or pass trust.requirePinnedAnchor: false ' +
+          'and accept that this verification rests on an unauthenticated anchor.',
+      );
+    }
+
+    // Try each key the federation names for this issuer. More than one is
+    // normal during a rotation, and refusing to try the second is how a routine
+    // key rotation becomes an outage.
+    let lastError;
+    for (const candidate of resolved.keys) {
+      try {
+        await sdVerify(presented, { issuerKey: candidate.key, audience, nonce, requireKeyBinding, now });
+        key = candidate.key;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!key) {
+      throw new Error(
+        `card claims to be issued by ${claimedIssuer}, and it does not verify against any of the ` +
+          `${resolved.keys.length} key(s) the federation names for that issuer: ${lastError?.message}`,
+      );
+    }
+  }
+
+  const result = await sdVerify(presented, { issuerKey: key, audience, nonce, requireKeyBinding, now });
   const card = result.claims;
+
+  if (resolved && card.iss !== resolved.issuer) {
+    throw new Error(`card iss "${card.iss}" is not the issuer whose key was resolved (${resolved.issuer})`);
+  }
 
   if (card.vct !== AIC_VCT) throw new Error(`not an Agent Identity Card: vct is ${card.vct}`);
 
@@ -120,7 +190,18 @@ export async function verify(presented, { issuerKey, audience, nonce, requireKey
     throw new Error('Agent Identity Card claims it does not always disclose that it is an agent. Rejected.');
   }
 
-  return { ...result, card, thumbprint: await cardThumbprint(presented) };
+  return {
+    ...result,
+    card,
+    thumbprint: await cardThumbprint(presented),
+    // How this card's issuer key was established, so a caller can log the
+    // difference between "the federation vouches for this issuer" and "somebody
+    // handed us a key". Those are not the same fact and a verifier that records
+    // them identically cannot audit its own trust decisions later.
+    issuerTrust: resolved
+      ? { via: 'federation', anchor: resolved.anchor, issuer: resolved.issuer, pinnedAnchor: resolved.pinnedAnchor }
+      : { via: 'caller-supplied-key', anchor: null, issuer: null, pinnedAnchor: false },
+  };
 }
 
 /** Binds a delegation to one specific card. Over the issuer JWT, not the disclosures. */

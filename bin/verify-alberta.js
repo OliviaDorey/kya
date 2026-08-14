@@ -22,11 +22,17 @@ let failures = 0;
 console.log(head('1. Trust anchor'));
 let anchor;
 try {
-  anchor = await fetchTrustAnchor(ALBERTA_TRUST_ANCHOR);
+  // trustOnFirstUse, said out loud. Pinning became the default on 14 August
+  // 2026 and this tool is precisely the bootstrap case: its job is to discover
+  // what Alberta publishes, so it cannot already know the thumbprints. The
+  // right end state is to record what this prints and pin it thereafter.
+  anchor = await fetchTrustAnchor(ALBERTA_TRUST_ANCHOR, { trustOnFirstUse: true });
   const fe = anchor.payload.metadata?.federation_entity ?? {};
   console.log(ok(`fetched and signature verified: ${anchor.entityId}`));
   console.log(note(`${fe.organization_name ?? 'unnamed'} · contact ${(fe.contacts ?? []).join(', ') || 'none published'}`));
   console.log(note(`signed ${anchor.header.alg}, kid ${anchor.header.kid}, expires ${new Date(anchor.payload.exp * 1000).toISOString().slice(0, 10)}`));
+  console.log(note(`UNPINNED (trust on first use). An anchor signs its own configuration, so this`));
+  console.log(note(`establishes nothing until pinned. Pin these thumbprints: ${anchor.thumbprints.join(', ')}`));
 
   const allowed = anchor.payload.constraints?.allowed_leaf_entity_types;
   if (allowed) {

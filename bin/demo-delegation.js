@@ -16,6 +16,7 @@
 import { generateKeyPair, exportJWK } from 'jose';
 import * as aic from '../src/aic.js';
 import * as adc from '../src/adc.js';
+import { derive as derivePairwise } from '../src/pairwise.js';
 import * as status from '../src/status.js';
 import * as determination from '../src/determination.js';
 import * as capability from '../src/capability.js';
@@ -26,6 +27,12 @@ const ok = (s) => say(`  ✓ ${s}`);
 const no = (s) => say(`  ✗ ${s}`);
 
 const now = Date.now();
+// Never leaves the wallet. It is the key the pairwise subject is derived with,
+// and the reason no verifier can recompute the person's subject at any other
+// verifier — which is the whole point, and also why a lying wallet is
+// undetectable from outside. Threat model item 22.
+const WALLET_SECRET = 'demo-wallet-secret-never-transmitted';
+
 const sec = Math.floor(now / 1000);
 
 const issuer = await generateKeyPair('ES256', { extractable: true });
@@ -107,8 +114,15 @@ const delegation = {
   iat: sec,
   exp: sec + 14 * 86400,
   delegator: {
-    sub: 'pw:9c1f4e77a2',           // pairwise for this verifier only
+    // Derived, not invented. This read `sub: 'pw:9c1f4e77a2'` with a comment
+    // saying "pairwise for this verifier only", which was a hand-written constant
+    // asserting a property nothing computed and nothing checked — the same shape
+    // of defect as the 'x' and 'y' thumbprints elsewhere in this repository.
+    // v0.4 computes it, and names the verifier it was computed for so that a
+    // delegation minted for this caseworker is refused at any other.
+    sub: derivePairwise({ walletSecret: WALLET_SECRET, verifierId: 'https://caseworker.alberta.ca' }),
     pairwise: true,
+    sub_audience: 'https://caseworker.alberta.ca',
     verified_by: 'https://account.alberta.ca/dts',
     assurance: 'substantial',
   },

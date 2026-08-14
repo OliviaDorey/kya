@@ -16,6 +16,7 @@ export * as capability from './capability.js';
 export * as revocation from './revocation.js';
 export * as chain from './chain.js';
 export * as register from './register.js';
+export * as pairwise from './pairwise.js';
 export * as federation from './federation.js';
 export * as alberta from './alberta.js';
 
@@ -27,3 +28,4 @@ export { CAPABILITIES } from './capability.js';
 export { MAX_HOPS } from './chain.js';
 export { AUTHORITY } from './revocation.js';
 export { STANDING, issuerTrusted } from './register.js';
+export { AVAILABILITY, outageGuidance } from './status.js';

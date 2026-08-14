@@ -384,7 +384,25 @@ export async function bindingBreaches(adc, { aic, presentedCard, aicThumbprint }
  * Returns the credential and the salt. **The salt belongs to the person**, and
  * without it they cannot later prove which sentence they consented to.
  */
-export async function issue({ adc, aic, walletKey, holderJwk, kid, alg = 'ES256', selective = ['purpose'] }) {
+export async function issue({ adc, aic, walletKey, holderJwk, kid, alg = 'ES256', selective = ['purpose'], pairwise }) {
+  // Compute the pairwise subject rather than trusting the caller to have got it
+  // right. Threat model priority 4: the flag was self-asserted and nothing
+  // computed anything, so a wallet author who reused a subject because deriving
+  // one is fiddly passed validation. Making the library do it removes the
+  // fiddliness, which is the actual cause.
+  if (pairwise) {
+    const { derive } = await import('./pairwise.js');
+    adc = {
+      ...adc,
+      delegator: {
+        ...adc.delegator,
+        sub: derive(pairwise),
+        pairwise: true,
+        sub_audience: pairwise.verifierId,
+      },
+    };
+  }
+
   if (adc.purpose !== undefined && !selective.includes('purpose')) {
     throw new Error(
       'refusing to issue a delegation with the purpose in the clear. ' +
@@ -478,6 +496,17 @@ export async function verify(presented, {
 
   const { ok, problems } = validate(adc, { aic, now });
   if (!ok) throw new Error(`presented delegation is not conforming:\n  - ${problems.join('\n  - ')}`);
+
+  // Where the verifier tells us who it is, check the subject was minted for it.
+  // Optional because a verifier that does not know its own federation entity id
+  // cannot do this, and refusing to verify at all would be worse.
+  if (audience) {
+    const { boundToVerifier } = await import('./pairwise.js');
+    const bound = boundToVerifier(adc.delegator, audience);
+    if (!bound.ok) {
+      throw new Error(`the delegator subject is not bound to this verifier:\n  - ${bound.problems.join('\n  - ')}`);
+    }
+  }
 
   const breaches = await bindingBreaches(adc, { aic, presentedCard, aicThumbprint });
   if (breaches.length) {

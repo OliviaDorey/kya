@@ -104,7 +104,26 @@ export async function verifyStatement(jwt, jwks, { expectedIssuer, expectedSubje
  * anchor's identity has to be pinned out of band. Pass `expectedKid` or
  * `expectedThumbprints` once you know them, and this becomes a real trust root.
  */
-export async function fetchTrustAnchor(entityId, { expectedKid } = {}) {
+export async function fetchTrustAnchor(entityId, { expectedKid, expectedThumbprints, trustOnFirstUse = false } = {}) {
+  // Pinning is now the default and not-pinning is the thing you have to ask for
+  // by name. Threat model item 13: an anchor signs its own configuration with a
+  // key published inside that configuration, so an unpinned anchor is a
+  // self-assertion and the whole chain below it inherits that. Making the
+  // insecure path the shorter one to type is how it becomes the deployed one.
+  //
+  // `trustOnFirstUse` is deliberately ugly to write and returns the thumbprints
+  // it saw, so the intended use is: run once, record what came back, pin it
+  // thereafter.
+  if (!expectedKid && !expectedThumbprints?.length && !trustOnFirstUse) {
+    throw new Error(
+      `refusing to fetch ${entityId} unpinned. A trust anchor signs its own Entity Configuration ` +
+        'with a key published inside it, so without a pin this establishes nothing and every ' +
+        'credential verified beneath it inherits that. Pass expectedKid or expectedThumbprints. ' +
+        'If you are bootstrapping and do not yet know them, pass trustOnFirstUse: true, record ' +
+        'the thumbprints it returns, and pin them from then on.',
+    );
+  }
+
   const url = wellKnownUrl(entityId);
   const jwt = await getJwt(url);
   const unverified = decodeJwt(jwt);
@@ -130,7 +149,83 @@ export async function fetchTrustAnchor(entityId, { expectedKid } = {}) {
     );
   }
 
-  return { entityId, jwt, payload, header, jwks: payload.jwks, url, keyQuirks };
+  const { calculateJwkThumbprint } = await import('jose');
+  const thumbprints = await Promise.all(
+    (payload.jwks?.keys ?? []).map((k) => calculateJwkThumbprint(sanitiseJwk(k), 'sha256').catch(() => null)),
+  );
+
+  if (expectedThumbprints?.length) {
+    const matched = thumbprints.some((t) => t && expectedThumbprints.includes(t));
+    if (!matched) {
+      throw new Error(
+        `trust anchor ${entityId} published keys ${thumbprints.filter(Boolean).join(', ')} and none of the ` +
+          `pinned thumbprints ${expectedThumbprints.join(', ')} were among them. Either they rotated ` +
+          'keys or this is not the anchor you think it is, and those two need different responses.',
+      );
+    }
+  }
+
+  return {
+    entityId,
+    jwt,
+    payload,
+    header,
+    jwks: payload.jwks,
+    url,
+    keyQuirks,
+    thumbprints: thumbprints.filter(Boolean),
+    // Surfaced so an unpinned bootstrap run cannot be mistaken for a pinned one
+    // by anything downstream that only looks at whether the call succeeded.
+    pinned: Boolean(expectedKid || expectedThumbprints?.length),
+  };
+}
+
+/**
+ * Resolve the key an issuer is actually entitled to sign credentials with.
+ *
+ * Threat model item 6, and priority 2: `aic.verify` verified against whatever
+ * key the caller handed it, and the federation code that could establish which
+ * key is legitimate sat in the same repository, unconnected to the credential
+ * path. A signature check against an unvetted key answers "was this signed by
+ * the key you gave me", which is a question nobody needed answered.
+ *
+ * The key comes from the **superior's statement about the subordinate**, never
+ * from the subordinate's own self-published configuration. That distinction is
+ * the entire value of a federation: an entity's claims about itself prove
+ * nothing, and the statement its anchor signs about it proves everything.
+ */
+export async function resolveIssuerKeys(anchor, issuerEntityId) {
+  const chain = await validateTrustChain(anchor, issuerEntityId);
+  if (!chain.valid) {
+    throw new Error(
+      `cannot resolve keys for ${issuerEntityId}: its trust chain to ${anchor.entityId} is not valid ` +
+        `(${chain.problems.join('; ')})`,
+    );
+  }
+
+  const keys = chain.statement.payload.jwks?.keys ?? [];
+  if (!keys.length) {
+    throw new Error(
+      `${anchor.entityId} signs a statement about ${issuerEntityId} that carries no jwks, so the ` +
+        'federation names no key this issuer may sign with.',
+    );
+  }
+
+  const { importJWK: imp } = await import('jose');
+  const imported = [];
+  for (const jwk of keys) {
+    const clean = sanitiseJwk(jwk);
+    try {
+      imported.push({ jwk: clean, key: await imp(clean, clean.alg ?? 'ES256') });
+    } catch {
+      // A key the federation publishes that this library cannot import is worth
+      // reporting rather than silently dropping, but it must not stop the ones
+      // that do work, or one bad key takes down a whole issuer.
+    }
+  }
+  if (!imported.length) throw new Error(`no usable signing key for ${issuerEntityId}; ${keys.length} published and none importable`);
+
+  return { issuer: issuerEntityId, anchor: anchor.entityId, keys: imported, pinnedAnchor: anchor.pinned === true, chain };
 }
 
 /** List an anchor's immediate subordinates. */

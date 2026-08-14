@@ -9,7 +9,7 @@ name. The version above governs.
 
 Editor: Olivia Dorey, The Kindred Agency, Bridgewater, Nova Scotia.
 Status: **draft, implemented and tested.** Every *must* in this document is
-enforced by `../src/` and defended by a named test in `../test/`, 91 of them.
+enforced by `../src/` and defended by a named test in `../test/`, 108 of them.
 The status line read "not implemented" for four days after that stopped being
 true, which is the same class of defect as a document claiming a feature that
 does not exist, and it is now checked in CI rather than remembered.
@@ -602,10 +602,41 @@ comments, which is the second time that has been the more productive order.
   place with the correction visible rather than edited away. KYA-OS does cover
   delegation and does specify revocation. The gap it leaves is a trust register.
 
-**Migration from v0.3.** None required. Everything in v0.4 is additive: a
-delegation with no `chain` claim is a single-hop chain and verifies exactly as it
-did. A deployment that wants suspension must publish a **two-bit** status list,
-because a one-bit list can say revoked or not revoked and nothing in between.
+- **Threat model priorities 2, 3 and 4 are closed.** Issuer keys now resolve
+  through the federation from the statement the anchor signs about the issuer,
+  never from the issuer's own claims about itself, and **anchor pinning is the
+  default** rather than an option. Status lists carry a published availability
+  target and a two-mirror minimum. `delegator.sub` is **computed** by the
+  library rather than asserted by a boolean.
+- **A known status-list outage buys no grace period.** A verifier that cannot
+  confirm a delegation is in force refuses it, announced outage or not: a
+  relaxation would hand an attacker exactly the window they wanted and would
+  break the promise made to whoever has just revoked. What is specified instead
+  is that the **relying party falls back to its pre-agent process and serves the
+  person directly**. Failing closed on the credential must never mean failing
+  closed on the person.
+
+**Migration from v0.3.** One breaking change, and the rest is additive.
+
+**Breaking:** where a delegation asserts `delegator.pairwise: true` and the
+verifier identifies itself with an audience, `delegator.sub_audience` must name
+the verifier the subject was derived for. A subject that claims to be
+per-verifier and cannot say which verifier is an assertion nobody can check.
+The consequence is real and is stated rather than buried: **a pairwise
+delegation is bound to one verifier**, so a person dealing with three programmes
+holds three delegations. That is the cost of the identifier not being a lifetime
+correlator, and it is the correct trade, but it is a cost.
+
+*This paragraph read "None required. Everything in v0.4 is additive" for several
+hours on 14 August, until the pairwise work later the same day made it false.
+Corrected here rather than quietly. The CI check added in this version catches a
+spec that calls a built thing unbuilt; it does not catch a migration note that
+has gone stale, and nothing yet does.*
+
+Additive: a delegation with no `chain` claim is a single-hop chain and verifies
+exactly as it did. A deployment that wants suspension must publish a **two-bit**
+status list, because a one-bit list can say revoked or not revoked and nothing
+in between.
 
 ### v0.3 — 13 August 2026
 

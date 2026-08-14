@@ -62,7 +62,12 @@ const baseDelegation = (over = {}) => ({
   iss: 'https://wallet.example.ca/u/1',
   iat: sec,
   exp: sec + 7 * 86400,
-  delegator: { sub: 'pw:abc', pairwise: true, verified_by: 'https://account.alberta.ca/dts', assurance: 'substantial' },
+  // sub_audience names the verifier this subject was derived for. Required from
+  // v0.4 whenever pairwise is asserted and the verifier identifies itself: a
+  // subject that claims to be per-verifier and cannot say which verifier is an
+  // assertion nobody can check, which is the same defect as the 'x' and 'y'
+  // thumbprints this suite carried until 13 August.
+  delegator: { sub: 'pw:abc', pairwise: true, sub_audience: 'https://v.ca', verified_by: 'https://account.alberta.ca/dts', assurance: 'substantial' },
   delegate: { agent_id: AGENT_ID, aic_thumbprint: BASE_CARD_THUMB, cnf_thumbprint: AGENT_KEY_THUMB },
   purpose: 'Apply for the Alberta Assured Income for the Severely Handicapped on my behalf, and appeal if I am refused.',
   purpose_commitment: capability.commitPurpose('x').commitment,
