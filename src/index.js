@@ -14,6 +14,8 @@ export * as status from './status.js';
 export * as determination from './determination.js';
 export * as capability from './capability.js';
 export * as revocation from './revocation.js';
+export * as chain from './chain.js';
+export * as register from './register.js';
 export * as federation from './federation.js';
 export * as alberta from './alberta.js';
 
@@ -22,3 +24,6 @@ export { ADC_VCT } from './adc.js';
 export { STATUS, inForce } from './status.js';
 export { TIER, KIND } from './determination.js';
 export { CAPABILITIES } from './capability.js';
+export { MAX_HOPS } from './chain.js';
+export { AUTHORITY } from './revocation.js';
+export { STANDING, issuerTrusted } from './register.js';
