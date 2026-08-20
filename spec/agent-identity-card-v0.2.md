@@ -520,7 +520,7 @@ publication. The licences in this repository record the intent; the board
 resolution is what makes them safe.
 
 **What Kindred keeps, and why this is commercially coherent.** The standard is
-free. The Loom, the Trustmark, the assurance assessment and the Friends and
+free. The Loom, the Kindred Badge, the assurance assessment and the Friends and
 Family roster are the business. Giving away the specification makes the
 certification more valuable, not less, because a standard nobody can implement
 certifies nothing. Red Hat, not Oracle.

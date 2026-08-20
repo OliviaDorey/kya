@@ -139,7 +139,7 @@ Newly covered. `revokeLink()` with descendant cascade.
 
 ## B. The gift boundary
 
-The specification is given away. Trustmark v0 — conformance suite, public
+The specification is given away. Kindred Badge v0 — conformance suite, public
 register, revocation switch — is deliberately retained. Revocation straddles the
 line, so the line has to be drawn explicitly rather than defaulted into.
 
