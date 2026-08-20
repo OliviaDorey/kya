@@ -8,6 +8,7 @@
     "test": "node --test \"test/*.test.js\"",
     "demo": "node bin/demo-delegation.js",
     "verify:alberta": "node bin/verify-alberta.js",
+    "gaiax": "node bin/gaiax-profile.js",
     "make:keys": "node bin/make-keys.js",
     "make:entity-config": "node bin/make-entity-config.js"
   },

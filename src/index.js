@@ -21,6 +21,7 @@ export * as conformance from './conformance.js';
 export * as wallet from './wallet.js';
 export * as federation from './federation.js';
 export * as alberta from './alberta.js';
+export * as gaiax from './gaiax.js';
 
 export { AIC_VCT } from './aic.js';
 export { ADC_VCT } from './adc.js';
@@ -31,3 +32,4 @@ export { MAX_HOPS } from './chain.js';
 export { AUTHORITY } from './revocation.js';
 export { STANDING, issuerTrusted } from './register.js';
 export { AVAILABILITY, outageGuidance } from './status.js';
+export { PROFILE_VERSION as GAIAX_PROFILE_VERSION } from './gaiax.js';

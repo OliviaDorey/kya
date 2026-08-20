@@ -153,8 +153,26 @@ rule cannot drift between callers.
 | `bin/make-entity-config.js` | The signed Entity Configuration to publish at `/.well-known/openid-federation` |
 | `bin/demo-delegation.js` | Issue, delegate, present, revoke. No network |
 | `bin/verify-alberta.js` | The interoperability proof |
+| `bin/gaiax-profile.js` | The Gaia-X profile, emitted and probed |
 
 ## Status
+
+**The Gaia-X profile landed 20 August 2026.** `src/gaiax.js` maps the Agent Identity Card onto
+a Gaia-X-compatible `gx:SoftwareResource`, `spec/gaia-x-participant-profile-v0.1.md` is the
+profile, and `test/gaiax.test.js` is the conformance test the claim is judged by. Run
+`npm run gaiax` for a sample self-description and a live conformance probe.
+
+An agent is not a legal person, so it is not a Gaia-X Participant; it is software a participant
+made and maintains. The capability ceiling becomes a `gx:policy`. The delegation credential has
+**no** Gaia-X equivalent — Gaia-X has no concept of a person mandating software to act for them
+against a third party — so it is declared as an extension rather than bent onto `gx:consent`,
+because consent to process data about me is not authority to act as me.
+
+Two things stated rather than hidden. This is semantic equivalence, not cryptographic: nothing
+in the mapping signs anything, and a re-signed credential is a new credential. And **Kindred
+does not mark its own homework** — the intended arrangement is that Gaia-X Hub Canada publishes
+the profile and runs the test on the Digital Trust Test Bench.
+
 
 The credentials, the status list, the rule basis, the federation half, the
 revocation service and **chained delegation** are built and tested.
