@@ -28,7 +28,7 @@
  */
 
 import { issue as sdIssue, verify as sdVerify, present as sdPresent, thumbprint } from './sdjwt.js';
-import { cardThumbprint, termsDigest } from './aic.js';
+import { cardThumbprint, termsDigest, TRANSFER_POLICY } from './aic.js';
 import {
   CAPABILITIES,
   actionsFor,
@@ -449,6 +449,79 @@ function classify(b) {
   if (b.document.held) return CONTINUITY.SAME_DOCUMENT;
   if (!b.terms.checked) return CONTINUITY.UNCHECKED;
   return b.terms.held ? CONTINUITY.REISSUED_SAME_TERMS : CONTINUITY.REISSUED_TERMS_CHANGED;
+}
+
+/**
+ * What a relying party should do, given a binding report and a card.
+ *
+ * This is where the three transfer policies actually live. They are settings on
+ * one mechanism rather than three designs, which is only possible because the
+ * report separates "different document" from "different terms".
+ *
+ * Returns the outcome and the reason, in words a caseworker could read aloud.
+ * It never decides on its own that a transfer is acceptable: an unrecorded
+ * transfer is refused under every policy, including notify, because notice is a
+ * condition of validity rather than a courtesy.
+ */
+export function transferOutcome({ report, aic, policy = TRANSFER_POLICY.VOID }) {
+  const c = report.continuity;
+
+  if (c === CONTINUITY.DIFFERENT_AGENT) {
+    return { allow: false, action: 'refuse', reason: 'this is not the agent the permission was granted to.' };
+  }
+  if (c === CONTINUITY.UNCHECKED) {
+    return { allow: false, action: 'refuse', reason: 'the permission could not be fully checked, so it fails closed.' };
+  }
+  if (c === CONTINUITY.SAME_DOCUMENT) {
+    return { allow: true, action: 'accept', reason: 'the permission matches the card presented with it.' };
+  }
+
+  const transferred = aic?.transfer !== undefined;
+  const noticed = Boolean(aic?.transfer?.notice?.given_at);
+
+  if (transferred && !noticed) {
+    return {
+      allow: false,
+      action: 'refuse',
+      reason: 'this agent changed hands and there is no record that anyone was told. A transfer '
+        + 'without notice is not a lighter kind of transfer, it is an unrecorded one.',
+    };
+  }
+
+  if (c === CONTINUITY.REISSUED_SAME_TERMS) {
+    return {
+      allow: true,
+      action: 'accept',
+      reason: 'the card was reissued and nothing the person agreed to has changed.',
+    };
+  }
+
+  // Terms changed. Which is exactly what a transfer looks like.
+  const what = transferred
+    ? `this agent is now run by ${aic?.operator?.legal_name ?? 'a different operator'}, having been run by `
+      + `${aic?.transfer?.from?.legal_name ?? 'someone else'}`
+    : 'something the person agreed to has changed';
+
+  if (policy === TRANSFER_POLICY.NOTIFY) {
+    return {
+      allow: true,
+      action: 'accept-and-notify',
+      reason: `${what}. The permission still stands and the person is being told.`,
+    };
+  }
+  if (policy === TRANSFER_POLICY.RE_CONSENT) {
+    return {
+      allow: false,
+      action: 'suspend-pending-re-consent',
+      reason: `${what}. The permission is paused until the person says it still holds. `
+        + 'They are not being asked to start again, only to confirm.',
+    };
+  }
+  return {
+    allow: false,
+    action: 'refuse',
+    reason: `${what}. The permission was granted against different terms and has ended.`,
+  };
 }
 
 /**

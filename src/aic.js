@@ -48,6 +48,19 @@ export const RESIDENCY_BASIS = ['asserted', 'contractual', 'attested'];
  */
 export const SUCCESSION = { ACTIVE: 'active', RETIRING: 'retiring', RETIRED: 'retired' };
 
+/**
+ * What happens to a delegation when the operator changes. Added 20 August 2026.
+ *
+ * VOID is the default everywhere in this library, and it is what the code
+ * already did before anyone chose it: a reissued card no longer matches, so the
+ * delegation fails. The other two are deliberate softenings and each requires
+ * the terms to be otherwise unchanged.
+ *
+ * The threshold between them belongs to the registrar rather than to any
+ * implementer, or the standard is read as one vendor's preference.
+ */
+export const TRANSFER_POLICY = { NOTIFY: 'notify', RE_CONSENT: 're-consent', VOID: 'void' };
+
 export const SELECTIVELY_DISCLOSABLE = ['model', 'assurance'];
 export const ALWAYS_DISCLOSED = ['agent', 'accountable', 'conduct', 'capabilities', 'cnf', 'status', 'builder'];
 
@@ -60,7 +73,7 @@ export const ALWAYS_DISCLOSED = ['agent', 'accountable', 'conduct', 'capabilitie
  * moment it is present it is not selectively disclosable. Absence is a state;
  * concealment is not.
  */
-export const NEVER_WITHHELD = ['succession'];
+export const NEVER_WITHHELD = ['succession', 'transfer'];
 
 /** Capabilities a delegation may draw from. An unknown one is a typo, not a feature. */
 export const KNOWN_CAPABILITIES = [
@@ -133,6 +146,41 @@ export function validate(card) {
       if (su.notice === null) {
         problems.push('succession.notice may not be null. Somebody has to have been told.');
       }
+    }
+  }
+
+  // Section 5B, transfer. A change of operator is the one vital event with no
+  // mechanism anywhere, and the person who granted authority to an agent run by
+  // a company they chose did not grant it to whoever bought that company.
+  //
+  // Notice is a condition of validity rather than a courtesy. A transfer nobody
+  // was told about is indistinguishable, from where the person stands, from an
+  // agent quietly changing hands.
+  if (card.transfer !== undefined) {
+    const t = card.transfer;
+    if (!t.from?.legal_name) {
+      problems.push('transfer.from.legal_name is required: who operated this agent before');
+    }
+    if (!t.effective) problems.push('transfer.effective is required: the date control changed');
+    if (t.notice === null || t.notice === undefined) {
+      problems.push(
+        'transfer.notice is required and may not be null. Record when the people who delegated to '
+        + 'this agent were told, and where they can read it. A transfer nobody was told about is '
+        + 'not a lighter kind of transfer, it is an unrecorded one.',
+      );
+    } else if (!t.notice.given_at) {
+      problems.push('transfer.notice.given_at is required; it is the date the delegators were told');
+    }
+    if (t.policy !== undefined && !Object.values(TRANSFER_POLICY).includes(t.policy)) {
+      problems.push(`transfer.policy must be one of: ${Object.values(TRANSFER_POLICY).join(', ')}`);
+    }
+    if (t.from?.legal_name && card.operator?.legal_name
+        && t.from.legal_name === card.operator.legal_name
+        && t.from.jurisdiction === card.operator.jurisdiction) {
+      problems.push(
+        'transfer.from names the same operator as operator: a transfer that transfers nothing is '
+        + 'either a mistake or a way to make a real transfer look routine.',
+      );
     }
   }
 
@@ -339,6 +387,41 @@ export async function verify(presented, { issuerKey, trust, audience, nonce, req
     }
   }
 
+  // Section 5B, transfer. A change of operator is the one vital event with no
+  // mechanism anywhere, and the person who granted authority to an agent run by
+  // a company they chose did not grant it to whoever bought that company.
+  //
+  // Notice is a condition of validity rather than a courtesy. A transfer nobody
+  // was told about is indistinguishable, from where the person stands, from an
+  // agent quietly changing hands.
+  if (card.transfer !== undefined) {
+    const t = card.transfer;
+    if (!t.from?.legal_name) {
+      problems.push('transfer.from.legal_name is required: who operated this agent before');
+    }
+    if (!t.effective) problems.push('transfer.effective is required: the date control changed');
+    if (t.notice === null || t.notice === undefined) {
+      problems.push(
+        'transfer.notice is required and may not be null. Record when the people who delegated to '
+        + 'this agent were told, and where they can read it. A transfer nobody was told about is '
+        + 'not a lighter kind of transfer, it is an unrecorded one.',
+      );
+    } else if (!t.notice.given_at) {
+      problems.push('transfer.notice.given_at is required; it is the date the delegators were told');
+    }
+    if (t.policy !== undefined && !Object.values(TRANSFER_POLICY).includes(t.policy)) {
+      problems.push(`transfer.policy must be one of: ${Object.values(TRANSFER_POLICY).join(', ')}`);
+    }
+    if (t.from?.legal_name && card.operator?.legal_name
+        && t.from.legal_name === card.operator.legal_name
+        && t.from.jurisdiction === card.operator.jurisdiction) {
+      problems.push(
+        'transfer.from names the same operator as operator: a transfer that transfers nothing is '
+        + 'either a mistake or a way to make a real transfer look routine.',
+      );
+    }
+  }
+
   if (card.conduct?.discloses_ai !== 'always') {
     throw new Error('Agent Identity Card claims it does not always disclose that it is an agent. Rejected.');
   }
@@ -406,6 +489,9 @@ export async function termsDigest(card) {
     capabilities: [...(card.capabilities ?? [])].sort(),
     conduct: card.conduct,
     succession: card.succession === undefined ? undefined : { state: card.succession.state },
+    // Included so a change of control is detectable even where the operator's
+    // legal name does not move, which is what a share sale looks like.
+    transfer: card.transfer === undefined ? undefined : { effective: card.transfer.effective },
   };
   const stable = (v) => {
     if (Array.isArray(v)) return v.map(stable);

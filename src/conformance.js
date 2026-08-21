@@ -209,3 +209,77 @@ export function explain(result) {
   for (const p of result.problems ?? []) lines.push(`  ${p}`);
   return lines.join('\n');
 }
+
+
+/**
+ * ── Probing a registrar ────────────────────────────────────────────────────
+ *
+ * Added 20 August 2026, with the registrar in src/events.js.
+ *
+ * The wallet probes above exist because two properties cannot be checked from a
+ * single credential: they are statements about a *set*. A registrar has the same
+ * shape of problem and a worse version of it, because a registrar is a single
+ * party asserting a history that nobody else holds a copy of. A verifier reading
+ * one lookup cannot tell a faithful record from a tidy one.
+ *
+ * So these probes ask the registrar to do things a faithful one does and a tidy
+ * one cannot: refuse a malformed event, keep an entry it would rather not, and
+ * report a current state that its own chain actually replays to.
+ *
+ * The same honest limit applies as to the wallet probes: **a registrar that
+ * lies passes.** Nothing here can detect a record that was never written. What
+ * it detects is a record that contradicts itself, which is the failure mode
+ * that occurs by accident rather than by intent, and that is worth catching on
+ * its own terms.
+ */
+export async function probeRegistrar(registry, { publicKey, agentId }) {
+  const findings = [];
+  const note = (id, ok, detail) => findings.push({ id, ok, detail });
+
+  // 1. The chain says what it says.
+  const chain = await registry.verify({ publicKey });
+  note('chain-intact', chain.ok,
+    chain.ok ? 'every entry verifies, and each names the entry before it. This does not cover '
+      + 'entries removed from the end of the chain, which needs a head published somewhere the '
+      + 'registrar does not control'
+      : `broken at: ${chain.results.filter((r) => !(r.sigOk && r.hashOk && r.chainOk)).map((r) => r.seq).join(', ')}`);
+
+  // 2. The reported state is the state the events replay to. A registrar that
+  //    keeps a cached current-state column can drift from its own history, and
+  //    the cached value is the one people read.
+  const look = registry.lookup(agentId);
+  const replay = registry.history(agentId).reduce((acc, e) => {
+    if (e.kind === 'revocation') acc = 'revoked';
+    else if (e.kind === 'death' && acc !== 'revoked') acc = 'retired';
+    else if (e.kind === 'suspension' && acc === 'valid') acc = 'suspended';
+    else if (e.kind === 'reinstatement' && acc === 'suspended') acc = 'valid';
+    else if (e.kind === 'birth' && acc === 'unknown') acc = 'valid';
+    return acc;
+  }, 'unknown');
+  note('state-replays', look.state === replay,
+    `reported "${look.state}", replayed "${replay}"`);
+
+  // 3. Malformed events are refused rather than stored and flagged. A registrar
+  //    that accepts a death with no successor has recorded an ending with
+  //    nothing said about the people who were relying on it.
+  const before = registry.entries.length;
+  let refused = false;
+  try {
+    await registry.append(
+      { agent_id: agentId, kind: 'death', at: '2026-01-01', effective: '2026-01-01', notice: { given_at: '2026-01-01' } },
+      { privateKey: null },
+    );
+  } catch { refused = true; }
+  note('refuses-malformed', refused && registry.entries.length === before,
+    refused ? 'a death naming no successor was refused at the door' : 'a malformed event was accepted');
+
+  // 4. Terminal events are terminal. Recording activity after a death is either
+  //    a correction, which is allowed and labelled, or a contradiction.
+  const h = registry.history(agentId);
+  const deathAt = h.findIndex((e) => e.kind === 'death');
+  const after = deathAt === -1 ? [] : h.slice(deathAt + 1).filter((e) => e.kind !== 'correction');
+  note('terminal-is-terminal', after.length === 0,
+    after.length ? `${after.length} non-correction event(s) recorded after a death` : 'nothing recorded after the end');
+
+  return { ok: findings.every((f) => f.ok), findings };
+}

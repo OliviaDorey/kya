@@ -8,6 +8,54 @@ non-assertion covenant in [PATENTS.md](PATENTS.md). Nobody needs to ask us.
 
 ---
 
+## 0.7.0 — 20 August 2026
+
+### The registrar
+
+Packages 4 to 7 of the specification scope. Suite went 157 to **174**.
+
+A trust anchor answers one question: may this agent act, right now. A registrar answers three: did
+it exist, what changed about it, and when did it end. The second contains the first, and
+`Registry.lookup()` computes it.
+
+- **`src/events.js`** — an append-only, signed, chained record. Nine event kinds: birth, version,
+  transfer, guardian, suspension, reinstatement, revocation, death, correction. Malformed events
+  are refused at the door rather than stored and flagged.
+- **A death must name a successor or explicitly name none.** A record that an agent ended, with
+  nothing said about the people relying on it, is an accountability sink with a certificate
+  attached.
+- **A transfer must carry notice.** Not as a courtesy: `transfer.notice.given_at` is a condition
+  of validity on both the card and the event.
+- **`Registry.lookup()`** — current operator, accountable human, version, successor, transfer
+  count, and a status derived from the events and then handed to the same `inForce()` every other
+  verifier uses. That is how "a verifier holding only the register decides as one holding the
+  credentials" is made true rather than asserted; there is a test that compares the two directly.
+- **Corrections amend without deleting.** The corrected entry stays in the history and the
+  amendment is itself part of the record, as a civil registry does it.
+- **Revocation outranks retirement** in the derived state, because a person asking why is owed the
+  first answer rather than the tidier second one.
+- **`aic.TRANSFER_POLICY`** and **`adc.transferOutcome()`** — notify, re-consent and void as three
+  settings on one mechanism, which is only possible because the binding report separates "different
+  document" from "different terms". VOID is the default. An **unrecorded** transfer is refused
+  under every policy, including notify.
+- **`conformance.probeRegistrar()`** — four probes: the chain is intact, the reported state is the
+  state the events replay to, malformed events are refused, and nothing is recorded after an end.
+
+### Two limits, stated rather than buried
+
+**A chain does not detect entries removed from the end.** A shorter chain is still a valid chain.
+Removing an entry from the *middle* is caught, because the entry after it no longer follows.
+Closing the tail case needs the head published somewhere the registrar does not control — a
+transparency log, a witness, or simply publishing the current hash and count on a schedule. Until
+then a registrar can drop its most recent entries and pass every check here. There is a test named
+`LIMITATION:` that asserts exactly this, so nobody mistakes it for tamper-evidence it does not have.
+
+**A registrar that lies passes.** Nothing here detects a record that was never written. What these
+probes detect is a record that contradicts itself, which is the failure that happens by accident
+rather than by intent, and it is worth catching on its own terms.
+
+---
+
 ## 0.6.0 — 20 August 2026
 
 ### Transfer, succession, and what a delegation is bound to
