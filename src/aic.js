@@ -34,8 +34,33 @@ export const AIC_VCT = 'https://agentcredential.ca/aic/v1';
  */
 export const RESIDENCY_BASIS = ['asserted', 'contractual', 'attested'];
 
+/**
+ * Succession states. Added 20 August 2026.
+ *
+ * An agent that stops working is one of the most consequential things that can
+ * happen to the person relying on it, and until now the specification had
+ * nothing to say about it. Revocation covers authority being withdrawn. This
+ * covers the working life ending.
+ *
+ * `retiring` exists so the notice period is a state rather than an intention:
+ * an agent that will be gone in thirty days is a different thing to a verifier,
+ * and to a person, than one that is gone.
+ */
+export const SUCCESSION = { ACTIVE: 'active', RETIRING: 'retiring', RETIRED: 'retired' };
+
 export const SELECTIVELY_DISCLOSABLE = ['model', 'assurance'];
 export const ALWAYS_DISCLOSED = ['agent', 'accountable', 'conduct', 'capabilities', 'cnf', 'status', 'builder'];
+
+/**
+ * Claims that may be absent but may never be *hidden*.
+ *
+ * Succession is optional in v0.5 so that cards issued before it existed remain
+ * valid. But a card that says it is retiring and then withholds that fact from
+ * a particular verifier would be worse than one that never said it, so the
+ * moment it is present it is not selectively disclosable. Absence is a state;
+ * concealment is not.
+ */
+export const NEVER_WITHHELD = ['succession'];
 
 /** Capabilities a delegation may draw from. An unknown one is a typo, not a feature. */
 export const KNOWN_CAPABILITIES = [
@@ -69,6 +94,47 @@ export function validate(card) {
   if (!card.accountable?.contact) problems.push('accountable.contact is required');
   if (!card.accountable?.role) problems.push('accountable.role is required');
   if (!card.accountable?.redress_uri) problems.push('accountable.redress_uri is required');
+
+  // Section 5A, succession. Optional in v0.5 so existing cards remain valid, and
+  // strictly checked the moment it is present. A card that says it is retiring
+  // and will not say what happens next is the accountability sink this whole
+  // specification exists to prevent, so it is refused at issue time rather than
+  // flagged for somebody to notice later.
+  if (card.succession !== undefined) {
+    const su = card.succession;
+    if (!Object.values(SUCCESSION).includes(su.state)) {
+      problems.push(`succession.state must be one of: ${Object.values(SUCCESSION).join(', ')}`);
+    }
+    if (su.state === SUCCESSION.RETIRING || su.state === SUCCESSION.RETIRED) {
+      if (!su.effective) {
+        problems.push('succession.effective is required once an agent is retiring or retired');
+      }
+      // Absent is refused; an explicit null is accepted. "Nobody takes this on"
+      // is a legitimate answer and a silence is not, on the same principle as
+      // model.disclosed and rule_basis.
+      if (!('successor' in su)) {
+        problems.push(
+          'succession.successor is required when retiring or retired. State the successor agent '
+          + 'id, or state null to say plainly that there is none. Omitting it leaves the person '
+          + 'relying on this agent with no answer at all.',
+        );
+      } else if (su.successor !== null && !/^urn:agent:/.test(String(su.successor))) {
+        problems.push('succession.successor should be a urn:agent: identifier, or null');
+      }
+      if (!('notice' in su)) {
+        problems.push(
+          'succession.notice is required when retiring or retired: an object recording when the '
+          + 'people relying on this agent were told, and where they can read it. A retirement '
+          + 'nobody was told about is an abandonment.',
+        );
+      } else if (su.notice !== null && !su.notice?.given_at) {
+        problems.push('succession.notice.given_at is required; it is the date the people relying on this agent were told');
+      }
+      if (su.notice === null) {
+        problems.push('succession.notice may not be null. Somebody has to have been told.');
+      }
+    }
+  }
 
   if (card.conduct?.discloses_ai !== 'always') {
     problems.push('conduct.discloses_ai must be "always" and is not configurable');
@@ -122,6 +188,13 @@ export function validate(card) {
 }
 
 export async function issue({ card, privateKey, holderJwk, kid, alg = 'ES256', selective = ['model', 'assurance'] }) {
+  const hidden = (selective ?? []).filter((k) => NEVER_WITHHELD.includes(k));
+  if (hidden.length) {
+    throw new Error(
+      `these claims may never be selectively withheld: ${hidden.join(', ')}. A card that says it `
+      + 'is retiring and then hides that from one verifier is worse than one that never said it.',
+    );
+  }
   const overreach = selective.filter((c) => ALWAYS_DISCLOSED.includes(c));
   if (overreach.length) {
     throw new Error(
@@ -225,6 +298,47 @@ export async function verify(presented, { issuerKey, trust, audience, nonce, req
     if (c === 'builder') continue;   // builder.registry_id may be withheld; the object may not
     if (card[c] === undefined) throw new Error(`Agent Identity Card is missing "${c}", which may never be withheld`);
   }
+  // Section 5A, succession. Optional in v0.5 so existing cards remain valid, and
+  // strictly checked the moment it is present. A card that says it is retiring
+  // and will not say what happens next is the accountability sink this whole
+  // specification exists to prevent, so it is refused at issue time rather than
+  // flagged for somebody to notice later.
+  if (card.succession !== undefined) {
+    const su = card.succession;
+    if (!Object.values(SUCCESSION).includes(su.state)) {
+      problems.push(`succession.state must be one of: ${Object.values(SUCCESSION).join(', ')}`);
+    }
+    if (su.state === SUCCESSION.RETIRING || su.state === SUCCESSION.RETIRED) {
+      if (!su.effective) {
+        problems.push('succession.effective is required once an agent is retiring or retired');
+      }
+      // Absent is refused; an explicit null is accepted. "Nobody takes this on"
+      // is a legitimate answer and a silence is not, on the same principle as
+      // model.disclosed and rule_basis.
+      if (!('successor' in su)) {
+        problems.push(
+          'succession.successor is required when retiring or retired. State the successor agent '
+          + 'id, or state null to say plainly that there is none. Omitting it leaves the person '
+          + 'relying on this agent with no answer at all.',
+        );
+      } else if (su.successor !== null && !/^urn:agent:/.test(String(su.successor))) {
+        problems.push('succession.successor should be a urn:agent: identifier, or null');
+      }
+      if (!('notice' in su)) {
+        problems.push(
+          'succession.notice is required when retiring or retired: an object recording when the '
+          + 'people relying on this agent were told, and where they can read it. A retirement '
+          + 'nobody was told about is an abandonment.',
+        );
+      } else if (su.notice !== null && !su.notice?.given_at) {
+        problems.push('succession.notice.given_at is required; it is the date the people relying on this agent were told');
+      }
+      if (su.notice === null) {
+        problems.push('succession.notice may not be null. Somebody has to have been told.');
+      }
+    }
+  }
+
   if (card.conduct?.discloses_ai !== 'always') {
     throw new Error('Agent Identity Card claims it does not always disclose that it is an agent. Rejected.');
   }
@@ -244,6 +358,69 @@ export async function verify(presented, { issuerKey, trust, audience, nonce, req
 }
 
 /** Binds a delegation to one specific card. Over the issuer JWT, not the disclosures. */
+/**
+ * The material terms of a card, as a stable digest.
+ *
+ * ── Why this exists ────────────────────────────────────────────────────────
+ *
+ * `cardThumbprint()` hashes the issued credential, so it changes whenever the
+ * card is reissued — including a reissue with identical claims, because the
+ * signature and the disclosure salts differ. That makes it a binding to a
+ * *document*. It is the right check for "is this the exact card I was shown",
+ * and the wrong one for "is this the agent I authorised", and until 20 August
+ * 2026 it was being used for both.
+ *
+ * This digest covers only the claims a person was actually agreeing to when
+ * they granted a delegation: who built and runs the agent, who answers for it,
+ * what it may ever do, how it behaves, where its model sits and on what basis
+ * that is known, and whether it is being retired. Reissue the card with those
+ * unchanged and the digest is unchanged. Change any of them and it moves.
+ *
+ * ── What it can and cannot cover, which is a real limit ────────────────────
+ *
+ * Only claims in ALWAYS_DISCLOSED. A verifier cannot detect a change in a claim
+ * it was never shown, so including selectively disclosable ones would make the
+ * digest fail whenever disclosure varied rather than whenever terms changed —
+ * which is worse than useless, because it would fire constantly and be switched
+ * off. Found the hard way on 20 August 2026: the first version covered `model`
+ * and every real presentation failed, because the demo withholds it.
+ *
+ * The consequence is stated rather than hidden: **a change to the model family
+ * or its hosting country does not move this digest**, so continuity across a
+ * reissue does not protect a person against that particular change. A relying
+ * party that cares about model residency has to require it disclosed and check
+ * it itself. That is a property of selective disclosure, not of this design,
+ * and the honest place for it is here rather than in a footnote.
+ *
+ * Also excluded: iat, exp, jti, the status list index, and assurance. The first
+ * four are bookkeeping. Assurance is excluded on purpose because an agent
+ * *gaining* a certification should not invalidate delegations already granted
+ * against it — the terms improved, and nobody needs re-asking.
+ */
+export async function termsDigest(card) {
+  const material = {
+    agent: { id: card.agent?.id },
+    builder: card.builder,
+    operator: card.operator,
+    accountable: card.accountable,
+    capabilities: [...(card.capabilities ?? [])].sort(),
+    conduct: card.conduct,
+    succession: card.succession === undefined ? undefined : { state: card.succession.state },
+  };
+  const stable = (v) => {
+    if (Array.isArray(v)) return v.map(stable);
+    if (v && typeof v === 'object') {
+      return Object.keys(v).sort().reduce((a, k) => {
+        if (v[k] !== undefined) a[k] = stable(v[k]);
+        return a;
+      }, {});
+    }
+    return v;
+  };
+  const { createHash } = await import('node:crypto');
+  return createHash('sha256').update(JSON.stringify(stable(material)), 'utf8').digest('base64url');
+}
+
 export async function cardThumbprint(presented) {
   const { createHash } = await import('node:crypto');
   const jwt = presented.split('~')[0];

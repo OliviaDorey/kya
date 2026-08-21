@@ -10,7 +10,28 @@
 import { deflateSync, inflateSync } from 'node:zlib';
 import { SignJWT, compactVerify } from 'jose';
 
-export const STATUS = { VALID: 0, INVALID: 1, SUSPENDED: 2 };
+/**
+ * What a status list can say about a credential.
+ *
+ * RETIRED was added 20 August 2026. Until then a verifier could not tell a
+ * retired agent from a revoked one, because there was no value for it — both
+ * came back as "not in force" and the person on the other end was told the same
+ * thing in both cases. Those are very different events. Revoked means somebody
+ * withdrew authority, usually for cause. Retired means the agent reached the end
+ * of its working life and, if it was retired properly, handed over.
+ *
+ * A third case needs no value of its own: an operator that has simply vanished
+ * shows up as an unreachable status list, which inForce() already fails closed
+ * on and names. Revoked, retired, and gone are therefore all distinguishable.
+ *
+ * RETIRED is 3, so a list carrying it must be built with `bits: 2` or wider.
+ */
+export const STATUS = { VALID: 0, INVALID: 1, SUSPENDED: 2, RETIRED: 3 };
+
+/** The smallest `bits` a list needs in order to express a given status. */
+export function bitsFor(status) {
+  return status <= 1 ? 1 : status <= 3 ? 2 : status <= 15 ? 4 : 8;
+}
 
 /** A packed bit array. `bits` is 1, 2, 4, or 8 per entry. */
 export class StatusList {
@@ -25,7 +46,12 @@ export class StatusList {
   set(idx, value) {
     this.#bounds(idx);
     const max = (1 << this.bits) - 1;
-    if (value < 0 || value > max) throw new Error(`status ${value} does not fit in ${this.bits} bits`);
+    if (value < 0 || value > max) {
+      throw new Error(
+        `status ${value} does not fit in ${this.bits} bits. A list that needs to express `
+        + `RETIRED must be built with bits: 2 or wider.`,
+      );
+    }
     const byte = Math.floor(idx / this.perByte);
     const shift = (idx % this.perByte) * this.bits;
     this.bytes[byte] = (this.bytes[byte] & ~(max << shift)) | (value << shift);
@@ -208,12 +234,25 @@ export function outageGuidance({ listUri, since = null, expectedBy = null, redre
  * relying on this being the boring, unconditional answer.
  */
 export function inForce({ status, stale, reachable = true }) {
-  if (!reachable) return { ok: false, reason: 'status list unreachable, failing closed' };
-  if (stale) return { ok: false, reason: 'status list older than its stated freshness window, failing closed' };
-  if (status === STATUS.INVALID) return { ok: false, reason: 'credential revoked' };
-  if (status === STATUS.SUSPENDED) return { ok: false, reason: 'credential suspended' };
-  if (status !== STATUS.VALID) return { ok: false, reason: `unrecognised status ${status}, failing closed` };
-  return { ok: true, reason: 'valid' };
+  // The operator that vanished. Distinguishable from both revoked and retired,
+  // and the only one of the three that is an abandonment.
+  if (!reachable) return { ok: false, reason: 'status list unreachable, failing closed', state: 'unreachable' };
+  if (stale) return { ok: false, reason: 'status list older than its stated freshness window, failing closed', state: 'stale' };
+  if (status === STATUS.INVALID) return { ok: false, reason: 'credential revoked', state: 'revoked' };
+  if (status === STATUS.SUSPENDED) return { ok: false, reason: 'credential suspended', state: 'suspended' };
+  // Retired is not revoked, and a verifier that conflates them tells the person
+  // the wrong thing about why their agent stopped working.
+  if (status === STATUS.RETIRED) {
+    return {
+      ok: false,
+      state: 'retired',
+      reason: 'the agent has been retired. This is the end of its working life rather than a '
+        + 'withdrawal of authority. Check its card for a successor before telling anyone there is '
+        + 'nothing further they can do.',
+    };
+  }
+  if (status !== STATUS.VALID) return { ok: false, reason: `unrecognised status ${status}, failing closed`, state: 'unknown' };
+  return { ok: true, reason: 'valid', state: 'valid' };
 }
 
 /**

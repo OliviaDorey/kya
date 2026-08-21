@@ -28,7 +28,7 @@
  */
 
 import { issue as sdIssue, verify as sdVerify, present as sdPresent, thumbprint } from './sdjwt.js';
-import { cardThumbprint } from './aic.js';
+import { cardThumbprint, termsDigest } from './aic.js';
 import {
   CAPABILITIES,
   actionsFor,
@@ -308,66 +308,171 @@ export function attenuationBreaches(adc, aic) {
  * to compare against cannot claim it checked the binding, so it says so and
  * rejects.
  */
-export async function bindingBreaches(adc, { aic, presentedCard, aicThumbprint } = {}) {
-  const out = [];
+/**
+ * How a delegation relates to the card presented with it.
+ *
+ * ── Why this replaced a flat list of breaches ──────────────────────────────
+ *
+ * Until 20 August 2026 there was one question: does this delegation match this
+ * card. The answer was yes or no, and a card reissued for any reason answered
+ * no — including a reissue with identical claims, because cardThumbprint()
+ * hashes the credential rather than the agent. So every vital event in an
+ * agent's life (a new operator, a new accountable human, a version bump, a key
+ * rotation) silently voided every delegation held against it, and the person
+ * found out when their agent was refused.
+ *
+ * There are really four questions, and they have different consequences:
+ *
+ *   is this the same agent?     agent_id, and the key it holds. Fatal if not.
+ *   is this the same document?  the thumbprint. Not fatal on its own.
+ *   have the terms changed?     the terms digest. This is the one that matters.
+ *   is it held by one party?    card key and delegation key. Fatal if not.
+ *
+ * A reissue with unchanged terms is continuity. A reissue with changed terms is
+ * a policy decision — notify, re-consent, or void — and the point of separating
+ * them is that the decision becomes possible to make at all.
+ *
+ * `agent_id` was a required field that nothing compared, which is the defect
+ * this file's own comments warn about. It is compared now.
+ */
+export const CONTINUITY = {
+  SAME_DOCUMENT: 'same-document',
+  REISSUED_SAME_TERMS: 'reissued-same-terms',
+  REISSUED_TERMS_CHANGED: 'reissued-terms-changed',
+  DIFFERENT_AGENT: 'different-agent',
+  UNCHECKED: 'unchecked',
+};
 
+export async function bindingReport(adc, { aic, presentedCard, aicThumbprint } = {}) {
+  const b = {
+    agent: { checked: false, held: false, detail: null },
+    key: { checked: false, held: false, detail: null },
+    holder: { checked: false, held: false, detail: null },
+    document: { checked: false, held: false, detail: null },
+    terms: { checked: false, held: false, detail: null },
+  };
+
+  // 1. The same agent. Compared against the card's own identifier.
+  const claimedAgent = adc.delegate?.agent_id;
+  const actualAgent = aic?.agent?.id;
+  if (claimedAgent && actualAgent) {
+    b.agent.checked = true;
+    b.agent.held = claimedAgent === actualAgent;
+    if (!b.agent.held) {
+      b.agent.detail = `agent_id binding failed: this delegation was granted to ${claimedAgent} `
+        + `and the card presented names ${actualAgent}. A delegation is not transferable between agents.`;
+    }
+  } else {
+    b.agent.detail = 'the agent binding could not be checked: no card claims were supplied, or '
+      + 'delegate.agent_id is absent. An unchecked binding is a failed binding.';
+  }
+
+  // 2. The same document.
   const claimedCard = adc.delegate?.aic_thumbprint;
   const actualCard = aicThumbprint ?? (presentedCard ? await cardThumbprint(presentedCard) : undefined);
-
-  if (actualCard === undefined) {
-    out.push(
-      'the card binding could not be checked: no Agent Identity Card was presented with this ' +
-        'delegation. Pass the presented card as "presentedCard", or its thumbprint as ' +
-        '"aicThumbprint" from aic.verify(). An unchecked binding is a failed binding.',
-    );
-  } else if (claimedCard !== actualCard) {
-    out.push(
-      `aic_thumbprint binding failed: this delegation was granted to the card ${claimedCard} ` +
-        `and the card presented with it is ${actualCard}. A delegation is not transferable between agents.`,
-    );
-  }
-
-  const presentedKey = adc.cnf?.jwk;
-  if (!presentedKey) {
-    out.push(
-      'the key binding could not be checked: the delegation carries no cnf.jwk, so there is ' +
-        'nothing to compare delegate.cnf_thumbprint against.',
-    );
-  } else {
-    const actualKey = await thumbprint(presentedKey);
-    if (adc.delegate?.cnf_thumbprint !== actualKey) {
-      out.push(
-        `cnf_thumbprint binding failed: this delegation was granted to the key ` +
-          `${adc.delegate?.cnf_thumbprint} and the key that signed this presentation is ${actualKey}.`,
-      );
+  if (actualCard !== undefined) {
+    b.document.checked = true;
+    b.document.held = claimedCard === actualCard;
+    if (!b.document.held) {
+      b.document.detail = `aic_thumbprint binding failed: this delegation was granted against the `
+        + `card ${claimedCard} and the card presented with it is ${actualCard}. That happens `
+        + `whenever the card is reissued, so whether it matters depends on the terms, and a `
+        + `delegation is still not transferable between agents.`;
     }
+  } else {
+    b.document.detail = 'the card binding could not be checked: no Agent Identity Card was '
+      + 'presented with this delegation. Pass the presented card as "presentedCard", or its '
+      + 'thumbprint as "aicThumbprint" from aic.verify(). An unchecked binding is a failed binding.';
   }
 
-  // The card and the delegation must be held by the same key. Without this, two
-  // separately valid credentials belonging to two different agents could be
-  // presented together.
-  //
-  // This was gated on `aic?.cnf?.jwk` until the review of 13 August 2026, which
-  // meant a caller following the documented `aicThumbprint` route got checks 1
-  // and 2 and skipped this one in silence. Checking two of three bindings and
-  // reporting no breach is the failure this whole function was written to end.
+  // 3. Have the terms changed. Only checkable where the delegation recorded them.
+  if (adc.delegate?.terms_digest && aic) {
+    b.terms.checked = true;
+    const actualTerms = await termsDigest(aic);
+    b.terms.held = adc.delegate.terms_digest === actualTerms;
+    if (!b.terms.held) {
+      b.terms.detail = 'the agent\u2019s terms have changed since this permission was granted. '
+        + 'Something the person was agreeing to \u2014 who runs it, who answers for it, what it '
+        + 'may ever do, or how it behaves \u2014 is not what it was.';
+    }
+  } else {
+    b.terms.detail = adc.delegate?.terms_digest
+      ? 'the terms binding could not be checked: no card claims were supplied.'
+      : 'this delegation predates terms binding and recorded no digest, so a change of terms '
+        + 'cannot be detected. Reissue it to gain the check.';
+  }
+
+  // 4. The key that signed this presentation.
+  const presentedKey = adc.cnf?.jwk;
+  if (presentedKey) {
+    b.key.checked = true;
+    const actualKey = await thumbprint(presentedKey);
+    b.key.held = adc.delegate?.cnf_thumbprint === actualKey;
+    if (!b.key.held) {
+      b.key.detail = `cnf_thumbprint binding failed: this delegation was granted to the key `
+        + `${adc.delegate?.cnf_thumbprint} and the key that signed this presentation is ${actualKey}.`;
+    }
+  } else {
+    b.key.detail = 'the key binding could not be checked: the delegation carries no cnf.jwk, so '
+      + 'there is nothing to compare delegate.cnf_thumbprint against.';
+  }
+
+  // 5. Card and delegation held by the same party.
   const cardKeyJwk = aic?.cnf?.jwk;
-  if (!cardKeyJwk) {
-    out.push(
-      'the holder binding could not be checked: no Agent Identity Card claims were supplied, ' +
-        'or the card carries no cnf.jwk, so there is nothing to compare the delegation holder ' +
-        'against. Pass the verified card as "aic". An unchecked binding is a failed binding.',
-    );
-  } else if (presentedKey) {
+  if (cardKeyJwk && presentedKey) {
+    b.holder.checked = true;
     const cardKey = await thumbprint(cardKeyJwk);
     const delegationKey = await thumbprint(presentedKey);
-    if (cardKey !== delegationKey) {
-      out.push(
-        `holder binding failed: the Agent Identity Card is held by key ${cardKey} and the ` +
-          `delegation by key ${delegationKey}. They are not the same agent.`,
-      );
+    b.holder.held = cardKey === delegationKey;
+    if (!b.holder.held) {
+      b.holder.detail = `holder binding failed: the Agent Identity Card is held by key ${cardKey} `
+        + `and the delegation by key ${delegationKey}. They are not the same agent.`;
     }
+  } else {
+    b.holder.detail = 'the holder binding could not be checked: no Agent Identity Card claims '
+      + 'were supplied, or the card carries no cnf.jwk, so there is nothing to compare the '
+      + 'delegation holder against. Pass the verified card as "aic". An unchecked binding is a '
+      + 'failed binding.';
   }
+
+  return { bindings: b, continuity: classify(b) };
+}
+
+function classify(b) {
+  const identityBroken = (b.agent.checked && !b.agent.held)
+    || (b.key.checked && !b.key.held)
+    || (b.holder.checked && !b.holder.held);
+  if (identityBroken) return CONTINUITY.DIFFERENT_AGENT;
+  if (!b.agent.checked || !b.key.checked || !b.holder.checked || !b.document.checked) {
+    return CONTINUITY.UNCHECKED;
+  }
+  if (b.document.held) return CONTINUITY.SAME_DOCUMENT;
+  if (!b.terms.checked) return CONTINUITY.UNCHECKED;
+  return b.terms.held ? CONTINUITY.REISSUED_SAME_TERMS : CONTINUITY.REISSUED_TERMS_CHANGED;
+}
+
+/**
+ * The flat list, unchanged in meaning.
+ *
+ * `allowReissue` is how a relying party opts into continuity across a reissue,
+ * and it is off by default. The default is therefore the strictest of the three
+ * transfer policies: a reissued card voids the delegation. That is what this
+ * library already did, and making it the explicit default rather than an
+ * emergent one is the point.
+ */
+export async function bindingBreaches(adc, { aic, presentedCard, aicThumbprint, allowReissue = false } = {}) {
+  const { bindings: b, continuity } = await bindingReport(adc, { aic, presentedCard, aicThumbprint });
+  const out = [];
+  const push = (x) => { if (x.detail && !x.held) out.push(x.detail); };
+
+  push(b.agent);
+  push(b.key);
+  push(b.holder);
+
+  const tolerated = allowReissue
+    && continuity === CONTINUITY.REISSUED_SAME_TERMS;
+  if (!tolerated) push(b.document);
+  if (b.terms.checked && !b.terms.held) push(b.terms);
 
   return out;
 }
@@ -401,6 +506,15 @@ export async function issue({ adc, aic, walletKey, holderJwk, kid, alg = 'ES256'
         sub_audience: pairwise.verifierId,
       },
     };
+  }
+
+  // Record what the person was actually agreeing to, computed from the card
+  // rather than accepted from the caller. Same principle as the pairwise
+  // subject above: a field the library computes cannot be got wrong by a caller
+  // who found it fiddly. Without this a reissued card is indistinguishable from
+  // a card whose terms changed, and continuity cannot be offered safely.
+  if (aic && !adc.delegate?.terms_digest) {
+    adc = { ...adc, delegate: { ...adc.delegate, terms_digest: await termsDigest(aic) } };
   }
 
   if (adc.purpose !== undefined && !selective.includes('purpose')) {
@@ -471,6 +585,11 @@ export async function verify(presented, {
   audience,
   nonce,
   now = Date.now(),
+  // Off by default, which makes the strictest transfer policy the default: a
+  // reissued card voids the delegation. A relying party that wants continuity
+  // across a reissue has to ask for it, and even then only gets it when the
+  // terms are unchanged.
+  allowReissue = false,
 }) {
   // The card is not optional here. validate() skips attenuation when it has no
   // card to narrow against, and bindingBreaches() cannot compare holders without
@@ -508,12 +627,16 @@ export async function verify(presented, {
     }
   }
 
-  const breaches = await bindingBreaches(adc, { aic, presentedCard, aicThumbprint });
+  const report = await bindingReport(adc, { aic, presentedCard, aicThumbprint });
+  const breaches = await bindingBreaches(adc, { aic, presentedCard, aicThumbprint, allowReissue });
   if (breaches.length) {
     throw new Error(`presented delegation is not bound to what was presented with it:\n  - ${breaches.join('\n  - ')}`);
   }
 
-  return { ...result, adc };
+  // The verdict travels with the result so a relying party can log why it
+  // accepted a delegation against a card that is not byte-identical to the one
+  // it was granted against.
+  return { ...result, adc, continuity: report.continuity, bindings: report.bindings };
 }
 
 /**

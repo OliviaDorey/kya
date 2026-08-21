@@ -8,6 +8,52 @@ non-assertion covenant in [PATENTS.md](PATENTS.md). Nobody needs to ask us.
 
 ---
 
+## 0.6.0 — 20 August 2026
+
+### Transfer, succession, and what a delegation is bound to
+
+Packages 1 to 3 of the specification scope. Suite went 144 to **157**.
+
+**The defect this began with.** A delegation bound to an Agent Identity Card by hashing the issued
+credential, so reissuing the card broke every delegation held against it — including a reissue
+with **identical claims**, because the signature and the disclosure salts differ. The binding was
+to a document, not to an agent. It was invisible only because cards live a year and delegations
+cap at thirty days, so no reissue happened in between; every vital event in an agent's life
+reissues the card mid-life.
+
+- **`aic.termsDigest(card)`** — a stable digest over the material terms a person was agreeing to:
+  who built and runs the agent, who answers for it, what it may ever do, how it behaves, and
+  whether it is being retired. Unchanged by a reissue, unchanged by bookkeeping, unchanged by an
+  agent *gaining* a certification. Moves when the operator changes or the ceiling widens.
+- **`adc.bindingReport()`** — five bindings reported separately (agent, key, holder, document,
+  terms) with a `continuity` verdict: `same-document`, `reissued-same-terms`,
+  `reissued-terms-changed`, `different-agent`, `unchecked`.
+- **`delegate.agent_id` is now compared.** It was a required field that nothing checked, which is
+  the defect this file's own comments warn about.
+- **`delegate.terms_digest`** is computed at issue from the card rather than accepted from the
+  caller, on the same principle as the pairwise subject.
+- **`allowReissue` on `adc.verify()`, off by default.** The default is therefore the strictest
+  transfer policy — a reissued card voids the delegation — which is what the library already did.
+  Making it explicit rather than emergent is the point. Continuity has to be asked for, and is
+  granted only when the terms are unchanged.
+- **`STATUS.RETIRED`.** Until now a verifier could not tell a retired agent from a revoked one.
+  Revoked, retired and *gone* (an unreachable list) are now three distinguishable states, all
+  failing closed. Needs `bits: 2`; `bitsFor()` says so and `set()` explains itself.
+- **`succession` on the card.** Optional, so cards predating it stay valid, and strictly checked
+  the moment it is present. A retirement must name a successor **or explicitly name none** —
+  absence is refused. A retirement with no recorded notice is refused: *a retirement nobody was
+  told about is an abandonment.* Never selectively disclosable.
+
+### A limit, stated rather than buried
+
+The terms digest covers only always-disclosed claims. A verifier cannot detect a change in a claim
+it was never shown, so **a change to the model family or its hosting country does not move the
+digest**. The first version covered `model` and every real presentation failed, because the demo
+withholds it. A relying party that cares about model residency must require it disclosed and check
+it itself. That is a property of selective disclosure rather than of this design.
+
+---
+
 ## 0.5.0 — 20 August 2026
 
 ### The Gaia-X profile
