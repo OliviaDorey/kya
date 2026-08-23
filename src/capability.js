@@ -66,7 +66,7 @@ export const CAPABILITY_ACTIONS = {
  */
 export const SENSITIVE_TERMS = {
   health: [
-    'disab', 'handicap', 'aish', 'assured income', 'medical', 'health', 'illness',
+    'disab', 'handicap', 'assured income', 'medical', 'health', 'illness',
     'diagnos', 'psychiatric', 'mental health', 'addiction', 'substance', 'hiv',
     'cancer', 'palliative', 'prescription', 'pharmacare', 'therapy', 'treatment',
   ],
@@ -93,6 +93,42 @@ const ALL_SENSITIVE = Object.entries(SENSITIVE_TERMS).flatMap(([category, terms]
 );
 
 /**
+ * Programme acronyms, which must match whole words rather than as substrings.
+ *
+ * The list above is stems on purpose: 'disab' should fire inside "disability"
+ * and "disabled", and substring matching is what makes that work. An acronym is
+ * the opposite case, and putting one in the stem list breaks it. Add 'adap'
+ * there and it fires on "adaptive equipment", "adapted vehicle" and "home
+ * adaptation" — ordinary disability vocabulary, and Alberta's own guide says
+ * "a vehicle adapted for a disability".
+ *
+ * That matters more here than a false positive usually would. A hit refuses the
+ * delegation rather than warning about it, so an over-broad acronym does not
+ * cost somebody a rewrite, it costs them the help. Screening people out of
+ * assistance to protect their privacy is still failing them.
+ *
+ * Boundary is anything that is not a letter or digit, so ADAP-1234, adap_file
+ * and "adap application" all hit, while "adaptive" does not.
+ *
+ * Added 22 August 2026. Alberta split AISH into AISH and the Alberta Disability
+ * Assistance Program on 2 July 2026; this list held 'aish' and knew nothing of
+ * 'adap', which meant the newer of two programmes standing side by side was the
+ * unprotected one. A list of programme names is a maintenance obligation, not a
+ * fact: when a jurisdiction renames or splits a programme, this is where it lands.
+ */
+export const SENSITIVE_ACRONYMS = {
+  health: ['aish', 'adap', 'pdd', 'cdb', 'rdsp'],
+};
+
+const ACRONYM_PATTERNS = Object.entries(SENSITIVE_ACRONYMS).flatMap(([category, terms]) =>
+  terms.map((term) => ({
+    term,
+    category,
+    re: new RegExp(`(^|[^a-z0-9])${term}([^a-z0-9]|$)`),
+  })),
+);
+
+/**
  * Screen a string for terms that must not travel in the clear.
  *
  * Returns every hit rather than the first, because a caller fixing one word at
@@ -101,7 +137,10 @@ const ALL_SENSITIVE = Object.entries(SENSITIVE_TERMS).flatMap(([category, terms]
 export function screen(text) {
   if (typeof text !== 'string' || !text) return [];
   const haystack = text.toLowerCase();
-  return ALL_SENSITIVE.filter(({ term }) => haystack.includes(term));
+  return [
+    ...ALL_SENSITIVE.filter(({ term }) => haystack.includes(term)),
+    ...ACRONYM_PATTERNS.filter(({ re }) => re.test(haystack)).map(({ term, category }) => ({ term, category })),
+  ];
 }
 
 /** Every publicly visible field of a delegation, flattened for screening. */
