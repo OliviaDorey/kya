@@ -8,6 +8,40 @@ non-assertion covenant in [PATENTS.md](PATENTS.md). Nobody needs to ask us.
 
 ---
 
+## 0.8.0 — 23 August 2026
+
+### The counter-claim
+
+*"Identity is about who claims you, and who you claim back."* Suite went 184 to **203**.
+Specification: [spec/the-counter-claim-v0.1.md](spec/the-counter-claim-v0.1.md).
+
+Everything here recorded who claims an agent. Nothing recorded that a person had made a claim
+back — a grant expires by design, a relationship lapses if it is not renewed, and the two are
+not the same event.
+
+- **`src/claim.js`** — the person's half, wallet-side by construction. Made, live, due, lapsed,
+  ended. Quarterly renewal by default, matching Keep in Touch.
+- **Renewal is always explicit.** No operation moves the renewal date without recording that
+  somebody said so, and a test asserts the absence. Silent extension is a subscription wearing a
+  relationship's clothes.
+- **A lapse narrows; it does not end.** `read` and `monitor` survive so the agent can still tell
+  a person what is happening to their file; everything that acts on their behalf stops. The
+  mid-appeal hazard is written down rather than pretended away.
+- **Only the principal may end a claim.** Others may stop the agent. Ending is free and needs no
+  reason; no implementation may take a payment for it.
+- **The purpose sentence never reaches a verifier.**
+- **`counter_claim` on transfer, guardian and death** — the registrar records the obligation and
+  never the claimant. Closed field set, refused at the door: the register says how many claims are
+  outstanding and by when, never whose. A `reconsent` event records discharge.
+- **An outstanding obligation does not change the status.** `adc.transferOutcome()` already
+  refuses an unrecorded transfer; two verifiers reaching the same verdict by different routes is
+  how they drift apart.
+
+An earlier draft put CLAIM and UNCLAIM in the registrar as event kinds. It would have broken the
+register's no-personal-data rule on the day it shipped.
+
+---
+
 ## 0.7.0 — 20 August 2026
 
 ### The registrar

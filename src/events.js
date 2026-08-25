@@ -63,6 +63,7 @@ export const EVENT = {
   VERSION: 'version',
   TRANSFER: 'transfer',
   GUARDIAN: 'guardian',
+  RECONSENT: 'reconsent',
   SUSPENSION: 'suspension',
   REINSTATEMENT: 'reinstatement',
   REVOCATION: 'revocation',
@@ -73,17 +74,52 @@ export const EVENT = {
 /** Events after which an agent may not act, whatever else the record says. */
 const TERMINAL = new Set([EVENT.REVOCATION, EVENT.DEATH]);
 
+/**
+ * What is being asked of the people who claimed this agent.
+ *
+ * Identity is bilateral: an agent is claimed by its operator and claimed back by
+ * the person relying on it. Three events change who is doing the claiming from
+ * the agent's side — transfer, guardian, death — and each therefore creates an
+ * obligation on the other side of the relationship. Today that obligation is
+ * discharged in silence or not at all: on an acquisition every agent changes
+ * accountable party, the delegation stays in force, and nobody is told.
+ *
+ * `TRANSFER_POLICY` in `aic.js` already states Kindred's position — re-consent
+ * for high assurance, notify for the rest. This generalises it from one event to
+ * all three, so it is a rule rather than a special case.
+ *
+ * **The counter-claim itself is not here and must never be.** This register
+ * records how many claims are outstanding and by when, never whose. A count is
+ * an obligation; a list is a surveillance system with a civic name. The claim
+ * lives in the person's wallet — see `claim.js`.
+ */
+export const COUNTER_CLAIM = {
+  RECONSENT: 'reconsent',   // the claim must be made again, actively
+  NOTIFY: 'notify',         // the person must be told; silence stands as assent
+};
+
+/**
+ * The only fields a counter-claim obligation may carry.
+ *
+ * A closed list, enforced, because the pressure on this object will always be to
+ * add one more helpful field — a claimant reference, a contact, a segment — and
+ * any of them turns a count into a list. If a field is needed that is not here,
+ * that is a conversation and not a commit.
+ */
+const COUNTER_CLAIM_FIELDS = new Set(['policy', 'window_days', 'outstanding']);
+
 /** What each event must carry beyond the common fields. */
 const REQUIRED = {
   [EVENT.BIRTH]: ['builder', 'operator', 'accountable', 'capabilities'],
   [EVENT.VERSION]: ['version'],
-  [EVENT.TRANSFER]: ['from', 'to', 'notice'],
-  [EVENT.GUARDIAN]: ['from', 'to'],
+  [EVENT.TRANSFER]: ['from', 'to', 'notice', 'counter_claim'],
+  [EVENT.GUARDIAN]: ['from', 'to', 'counter_claim'],
+  [EVENT.RECONSENT]: ['discharges', 'method', 'outstanding'],
   [EVENT.SUSPENSION]: ['by', 'reason'],
   [EVENT.REINSTATEMENT]: ['by'],
   [EVENT.REVOCATION]: ['by', 'reason'],
   // successor may be null, but it must be stated. Same discipline as the card.
-  [EVENT.DEATH]: ['effective', 'notice'],
+  [EVENT.DEATH]: ['effective', 'notice', 'counter_claim'],
   [EVENT.CORRECTION]: ['corrects', 'reason'],
 };
 
@@ -106,6 +142,44 @@ function problemsWith(event) {
       + 'kind of transfer, it is an unrecorded one.',
     );
   }
+  // The counter-claim, on the three events that change who claims the agent.
+  if (REQUIRED[event.kind]?.includes('counter_claim') && event.counter_claim !== undefined) {
+    const cc = event.counter_claim;
+    if (cc === null || typeof cc !== 'object') {
+      out.push('counter_claim must be an object stating what is asked of the people who claimed this agent');
+    } else {
+      if (!Object.values(COUNTER_CLAIM).includes(cc.policy)) {
+        out.push(`counter_claim.policy must be one of: ${Object.values(COUNTER_CLAIM).join(', ')}`);
+      }
+      if (cc.policy === COUNTER_CLAIM.RECONSENT && !(cc.window_days > 0)) {
+        out.push(
+          'counter_claim.window_days is required for reconsent: a re-consent with no deadline is a '
+          + 'notification with a longer word.',
+        );
+      }
+      if (cc.outstanding !== undefined && typeof cc.outstanding !== 'number') {
+        out.push('counter_claim.outstanding must be a count. This register records how many, never whose.');
+      }
+      for (const key of Object.keys(cc)) {
+        if (!COUNTER_CLAIM_FIELDS.has(key)) {
+          out.push(
+            `counter_claim."${key}" is not a permitted field. Permitted: ${[...COUNTER_CLAIM_FIELDS].join(', ')}. `
+            + 'Anything identifying a person turns this register into a list of who relies on which agent.',
+          );
+        }
+      }
+    }
+  }
+
+  if (event.kind === EVENT.RECONSENT) {
+    if (typeof event.discharges !== 'number') {
+      out.push('reconsent.discharges must be the seq of the event whose obligation this discharges');
+    }
+    if (typeof event.outstanding !== 'number') {
+      out.push('reconsent.outstanding must be a count of claims still outstanding, never a list of them');
+    }
+  }
+
   if (event.kind === EVENT.DEATH) {
     if (!('successor' in event)) {
       out.push(
@@ -145,6 +219,21 @@ function stable(v) {
 }
 
 export const GENESIS = 'genesis';
+
+/** One counter-claim obligation, as read back out of the record. */
+function obligation(e) {
+  const cc = e.counter_claim ?? {};
+  return {
+    seq: e.seq,
+    kind: e.kind,
+    at: e.at,
+    policy: cc.policy ?? null,
+    window_days: cc.window_days ?? null,
+    outstanding: cc.outstanding ?? null,
+    discharged: false,
+    discharged_at: null,
+  };
+}
 
 /**
  * A registrar's record.
@@ -233,6 +322,7 @@ export class Registry {
       version: null,
       successor: undefined,
       transfers: 0,
+      counter_claims: [],
       suspended: false,
       revoked: false,
       retired: false,
@@ -249,18 +339,41 @@ export class Registry {
           current.version = e.version ?? null;
           break;
         case EVENT.VERSION: current.version = e.version; break;
-        case EVENT.TRANSFER: current.operator = e.to; current.transfers += 1; break;
-        case EVENT.GUARDIAN: current.accountable = e.to; break;
+        case EVENT.TRANSFER:
+          current.operator = e.to; current.transfers += 1;
+          current.counter_claims.push(obligation(e));
+          break;
+        case EVENT.GUARDIAN:
+          current.accountable = e.to;
+          current.counter_claims.push(obligation(e));
+          break;
+        case EVENT.RECONSENT: {
+          const o = current.counter_claims.find((c) => c.seq === e.discharges);
+          if (o) { o.discharged = true; o.outstanding = e.outstanding; o.discharged_at = e.at; }
+          break;
+        }
         case EVENT.SUSPENSION: current.suspended = true; break;
         case EVENT.REINSTATEMENT: current.suspended = false; break;
         case EVENT.REVOCATION: current.revoked = true; break;
         case EVENT.DEATH:
           current.retired = true;
           current.successor = e.successor;
+          current.counter_claims.push(obligation(e));
           break;
         default: break;
       }
     }
+
+    // Obligations to the other side of the relationship. Reported, and
+    // deliberately NOT folded into the status.
+    //
+    // The temptation is to make an overdue re-consent invalidate the agent here.
+    // It is refused for one reason: `adc.transferOutcome()` already refuses an
+    // unrecorded transfer on the credential path, and a registrar that reached
+    // the same verdict by a different route is exactly how two verifiers drift
+    // apart while both look correct. One rule, one place. This surfaces the fact;
+    // the policy layer acts on it.
+    current.counter_claim_outstanding = current.counter_claims.some((c) => !c.discharged);
 
     // Terminal states first, and revocation before retirement: an agent revoked
     // for cause and then decommissioned was still revoked, and a person asking

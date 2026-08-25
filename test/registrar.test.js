@@ -101,9 +101,11 @@ test('the record is chained, and editing one entry breaks that entry', async () 
   const r = await reg();
   await add(r, birth());
   await add(r, { agent_id: A, kind: events.EVENT.TRANSFER, at: '2026-06-01',
-    from: { legal_name: 'The Kindred Agency' }, to: { legal_name: 'Acquirer Co' }, notice: { given_at: '2026-05-01' } });
+    from: { legal_name: 'The Kindred Agency' }, to: { legal_name: 'Acquirer Co' }, notice: { given_at: '2026-05-01' },
+    counter_claim: { policy: events.COUNTER_CLAIM.RECONSENT, window_days: 30 } });
   await add(r, { agent_id: A, kind: events.EVENT.GUARDIAN, at: '2026-07-01',
-    from: { role: 'CTO', contact: 'old@example.ca' }, to: { role: 'CTO', contact: 'new@example.ca' } });
+    from: { role: 'CTO', contact: 'old@example.ca' }, to: { role: 'CTO', contact: 'new@example.ca' },
+    counter_claim: { policy: events.COUNTER_CLAIM.NOTIFY } });
 
   const clean = await r.verify({ publicKey: keys.publicKey });
   assert.equal(clean.ok, true);
@@ -119,7 +121,7 @@ test('a death that names neither a successor nor an explicit none is refused at 
   const r = await reg();
   await add(r, birth());
   await assert.rejects(
-    add(r, { agent_id: A, kind: events.EVENT.DEATH, at: '2026-12-01', effective: '2026-12-01', notice: { given_at: '2026-11-01' } }),
+    add(r, { agent_id: A, kind: events.EVENT.DEATH, at: '2026-12-01', effective: '2026-12-01', notice: { given_at: '2026-11-01' }, counter_claim: { policy: events.COUNTER_CLAIM.NOTIFY } }),
     /death requires "successor"/,
   );
   assert.equal(r.entries.length, 1, 'and it is not stored');
@@ -129,7 +131,7 @@ test('a death may say plainly that nobody is taking this on', async () => {
   const r = await reg();
   await add(r, birth());
   await add(r, { agent_id: A, kind: events.EVENT.DEATH, at: '2026-12-01', effective: '2026-12-01',
-    successor: null, notice: { given_at: '2026-11-01', uri: 'https://example.ca/notice' } });
+    successor: null, notice: { given_at: '2026-11-01', uri: 'https://example.ca/notice' }, counter_claim: { policy: events.COUNTER_CLAIM.NOTIFY } });
   assert.equal(r.lookup(A).successor, null);
 });
 
@@ -151,7 +153,8 @@ test('the lookup carries the current operator, not the founding one', async () =
   const r = await reg();
   await add(r, birth());
   await add(r, { agent_id: A, kind: events.EVENT.TRANSFER, at: '2026-06-01',
-    from: { legal_name: 'The Kindred Agency' }, to: { legal_name: 'Acquirer Co' }, notice: { given_at: '2026-05-01' } });
+    from: { legal_name: 'The Kindred Agency' }, to: { legal_name: 'Acquirer Co' }, notice: { given_at: '2026-05-01' },
+    counter_claim: { policy: events.COUNTER_CLAIM.RECONSENT, window_days: 30 } });
   const l = r.lookup(A);
   assert.equal(l.operator.legal_name, 'Acquirer Co');
   assert.equal(l.transfers, 1);
@@ -170,7 +173,7 @@ test('revocation outranks retirement, because a person asking why is owed the fi
   const r = await reg();
   await add(r, birth());
   await add(r, { agent_id: A, kind: events.EVENT.REVOCATION, at: '2026-08-01', by: 'https://registry.example.ca', reason: 'key compromise' });
-  await add(r, { agent_id: A, kind: events.EVENT.DEATH, at: '2026-09-01', effective: '2026-09-01', successor: null, notice: { given_at: '2026-08-15' } });
+  await add(r, { agent_id: A, kind: events.EVENT.DEATH, at: '2026-09-01', effective: '2026-09-01', successor: null, notice: { given_at: '2026-08-15' }, counter_claim: { policy: events.COUNTER_CLAIM.NOTIFY } });
   assert.equal(r.lookup(A).state, 'revoked');
 });
 
@@ -178,7 +181,7 @@ test('THE PROPERTY: the registrar and the credentials reach the same decision', 
   for (const [kind, extra, expected] of [
     [events.EVENT.SUSPENSION, { by: 'https://v.example.ca', reason: 'under review' }, status.STATUS.SUSPENDED],
     [events.EVENT.REVOCATION, { by: 'https://v.example.ca', reason: 'cause' }, status.STATUS.INVALID],
-    [events.EVENT.DEATH, { effective: '2026-12-01', successor: null, notice: { given_at: '2026-11-01' } }, status.STATUS.RETIRED],
+    [events.EVENT.DEATH, { effective: '2026-12-01', successor: null, notice: { given_at: '2026-11-01' }, counter_claim: { policy: events.COUNTER_CLAIM.NOTIFY } }, status.STATUS.RETIRED],
   ]) {
     const r = await reg();
     await add(r, birth());
@@ -196,7 +199,8 @@ test('the probes pass a faithful registrar', async () => {
   const r = await reg();
   await add(r, birth());
   await add(r, { agent_id: A, kind: events.EVENT.TRANSFER, at: '2026-06-01',
-    from: { legal_name: 'K' }, to: { legal_name: 'Acquirer Co' }, notice: { given_at: '2026-05-01' } });
+    from: { legal_name: 'K' }, to: { legal_name: 'Acquirer Co' }, notice: { given_at: '2026-05-01' },
+    counter_claim: { policy: events.COUNTER_CLAIM.RECONSENT, window_days: 30 } });
   const { ok, findings } = await probeRegistrar(r, { publicKey: keys.publicKey, agentId: A });
   assert.equal(ok, true, JSON.stringify(findings, null, 1));
   assert.equal(findings.length, 4);
@@ -206,7 +210,7 @@ test('the probes catch an entry removed from the middle of the record', async ()
   const r = await reg();
   await add(r, birth());
   await add(r, { agent_id: A, kind: events.EVENT.REVOCATION, at: '2026-08-01', by: 'https://v.example.ca', reason: 'cause' });
-  await add(r, { agent_id: A, kind: events.EVENT.GUARDIAN, at: '2026-09-01', from: { role: 'CTO' }, to: { role: 'CTO' } });
+  await add(r, { agent_id: A, kind: events.EVENT.GUARDIAN, at: '2026-09-01', from: { role: 'CTO' }, to: { role: 'CTO' }, counter_claim: { policy: events.COUNTER_CLAIM.NOTIFY } });
 
   // A tidy registrar drops the entry it would rather not have.
   r.entries.splice(1, 1);

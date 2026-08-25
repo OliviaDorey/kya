@@ -127,6 +127,48 @@ const CLAIMS = [
     holds: () => wallet.describeCost(3).identity_cards === 3 && wallet.describeCost(3).agent_keys === 3,
   },
   {
+    file: 'src/claim.js',
+    sentence: 'a claim somebody else can end on your behalf was never yours',
+    holds: async () => {
+      const claim = await import('../src/claim.js');
+      const rev = await import('../src/revocation.js');
+      const c = claim.make({ agent_id: 'a', aic_thumbprint: 't', purpose: 'p', made_at: '2026-01-01' });
+      if (claim.end(c, { by: rev.AUTHORITY.PRINCIPAL }).ended_by !== rev.AUTHORITY.PRINCIPAL) return false;
+      return [rev.AUTHORITY.ACCOUNTABLE, rev.AUTHORITY.ISSUER, rev.AUTHORITY.ANCESTOR, rev.AUTHORITY.RELYING_PARTY]
+        .every((by) => {
+          try { claim.end(c, { by }); return false; } catch { return true; }
+        });
+    },
+  },
+  {
+    file: 'src/claim.js',
+    sentence: 'A live or due claim changes nothing. A lapsed claim keeps `read` and `monitor`',
+    holds: async () => {
+      const claim = await import('../src/claim.js');
+      const all = ['read', 'draft', 'submit', 'monitor', 'appeal'];
+      const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      return same(claim.narrow(all, claim.CLAIM_STATE.LIVE), all)
+        && same(claim.narrow(all, claim.CLAIM_STATE.DUE), all)
+        && same(claim.narrow(all, claim.CLAIM_STATE.LAPSED), ['read', 'monitor'])
+        && same(claim.narrow(all, claim.CLAIM_STATE.ENDED), []);
+    },
+  },
+  {
+    file: 'src/events.js',
+    sentence: 'counter_claim.outstanding must be a count. This register records how many, never whose.',
+    holds: async () => {
+      const events = await import('../src/events.js');
+      const base = {
+        agent_id: 'a', kind: events.EVENT.TRANSFER, at: '2026-06-01',
+        from: { legal_name: 'A' }, to: { legal_name: 'B' }, notice: { given_at: '2026-05-01' },
+      };
+      const listed = events.validate({ ...base, counter_claim: { policy: 'notify', outstanding: ['did:example:alice'] } });
+      const extra = events.validate({ ...base, counter_claim: { policy: 'notify', claimants: ['did:example:alice'] } });
+      const clean = events.validate({ ...base, counter_claim: { policy: 'notify', outstanding: 4 } });
+      return !listed.ok && !extra.ok && clean.ok;
+    },
+  },
+  {
     file: 'src/status.js',
     sentence: 'nothing changes about the authority',
     // Written in the spec; the mechanism lives here. A grace period appearing in
