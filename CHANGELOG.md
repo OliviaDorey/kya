@@ -8,6 +8,37 @@ non-assertion covenant in [PATENTS.md](PATENTS.md). Nobody needs to ask us.
 
 ---
 
+## 0.9.0 — 26 August 2026
+
+### The witness
+
+*"If you buy a tartan and it doesn't belong to you and someone calls you on it, it is not hard to
+figure that out."* Suite 203 to **216**. Specification: §8 of
+[spec/the-counter-claim-v0.1.md](spec/the-counter-claim-v0.1.md).
+
+Every verification path here belonged to a party to the transaction. A claim could be false, and
+readable as false by anyone who looked, and there was nowhere for that person to say so —
+`redress_uri` belongs to the person harmed, not to the person who noticed.
+
+- **`src/witness.js`** — a report channel that belongs to the observer. Closed vocabulary of
+  observations rather than a grievance form.
+- **A report is never a determination.** Recording changes no status; fifty reports change no
+  status. A public channel that moved standing would hand every passer-by the power deliberately
+  withheld from relying parties.
+- **Only the anchor determines.** An operator adjudicating reports about its own agents is an
+  issuer signing its own status list.
+- **The subject is always told**, and the notice says plainly that nothing has changed. The
+  reporter is named to the anchor always and to the subject only by agreement.
+- **No fee and no bounty.** A fee suppresses reports; a bounty manufactures them, and
+  manufactured reports fall hardest on the operators least able to answer.
+- **The report shape is closed.** The first version destructured what it knew and dropped the
+  rest, so `{ reward: 100 }` passed straight through the guard written to refuse it, and the test
+  still went green. A guard that silently discards what it guards against is decoration.
+- **Limitation recorded:** a register **substitutes** for a community dense enough to know the
+  pattern. It does not improve on it.
+
+---
+
 ## 0.8.0 — 26 August 2026
 
 ### The counter-claim

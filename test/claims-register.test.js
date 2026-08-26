@@ -169,6 +169,21 @@ const CLAIMS = [
     },
   },
   {
+    file: 'src/witness.js',
+    sentence: 'A report is an observation; only the anchor determines.',
+    holds: async () => {
+      const w = await import('../src/witness.js');
+      if (w.effect().status_change !== null) return false;
+      const log = new w.WitnessLog({ anchor: 'https://anchor.example.ca' });
+      log.record(w.make({
+        subject_agent_id: 'a', observation: w.OBSERVATION.NOT_THEIRS, observed_at: '2026-08-26',
+        what: 'x', reporter: { id: 'did:example:b' },
+      }));
+      try { log.determine(1, { by: 'https://operator.example.ca', finding: w.FINDING.NOT_UPHELD, at: 'x' }); return false; }
+      catch { return true; }
+    },
+  },
+  {
     file: 'src/status.js',
     sentence: 'nothing changes about the authority',
     // Written in the spec; the mechanism lives here. A grace period appearing in

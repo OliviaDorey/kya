@@ -112,8 +112,35 @@ count still outstanding.
 registrar reaching the same verdict by a different route is how two verifiers drift apart while
 both look correct. One rule, one place: the register surfaces the fact, the policy layer acts.
 
-## 8. Conformance
+## 8. The witness
 
-Implemented and tested in `test/claim.test.js` (19 tests). Three sentences from this
-specification are in the claims register with checks attached: the ending asymmetry, the lapse
-narrowing, and the count-never-a-list rule.
+A tartan's fraud detection is distributed. Nobody stops you buying the cloth; the check happens
+later, in public, performed by somebody who knows the pattern and has no relationship to you.
+
+Every verification path in this specification belonged to a party to the transaction — a holder
+presents, a verifier checks, a register answers. None of them is the stranger at the dance, and
+`redress_uri` belongs to the person harmed rather than to the person who noticed. `witness.js`
+is that missing channel. Four rules:
+
+1. **A report is never a determination.** Recording one changes no status. A public channel that
+   moved status directly would hand every passer-by the power that §5 deliberately withholds from
+   relying parties.
+2. **Only the anchor determines.** An operator adjudicating reports about its own agents is an
+   issuer signing its own status list.
+3. **The subject is always told.** Every recorded report produces a notice, and that notice says
+   plainly that nothing has changed — because "a report has been filed" reads as a finding to
+   everybody who is not a lawyer. The reporter is named to the anchor always, and to the subject
+   only with the reporter's agreement.
+4. **No fee and no bounty.** A fee suppresses reports. A bounty manufactures them, and
+   manufactured reports fall hardest on the operators least able to answer.
+
+**The limit, stated.** A tartan cannot be worn falsely for long because the community is dense
+and everyone knows the pattern. At national scale it is not dense. A register **substitutes** for
+that density; it does not improve on it, and this channel is the thin half of the substitute.
+
+## 9. Conformance
+
+Implemented and tested in `test/claim.test.js` (19 tests) and `test/witness.test.js` (13).
+Four sentences from this specification are in the claims register with checks attached: the
+ending asymmetry, the lapse narrowing, the count-never-a-list rule, and the rule that a report
+determines nothing.

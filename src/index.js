@@ -23,6 +23,7 @@ export * as federation from './federation.js';
 export * as alberta from './alberta.js';
 export * as events from './events.js';
 export * as claim from './claim.js';
+export * as witness from './witness.js';
 export * as gaiax from './gaiax.js';
 
 export { AIC_VCT } from './aic.js';
@@ -37,5 +38,6 @@ export { AVAILABILITY, outageGuidance } from './status.js';
 export { PROFILE_VERSION as GAIAX_PROFILE_VERSION } from './gaiax.js';
 export { EVENT, COUNTER_CLAIM, Registry } from './events.js';
 export { CLAIM_STATE, SURVIVES_LAPSE } from './claim.js';
+export { FINDING, OBSERVATION, WitnessLog } from './witness.js';
 export { TRANSFER_POLICY } from './aic.js';
 export { CONTINUITY, transferOutcome } from './adc.js';
