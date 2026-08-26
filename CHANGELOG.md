@@ -8,7 +8,7 @@ non-assertion covenant in [PATENTS.md](PATENTS.md). Nobody needs to ask us.
 
 ---
 
-## 0.8.0 — 23 August 2026
+## 0.8.0 — 26 August 2026
 
 ### The counter-claim
 

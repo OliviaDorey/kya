@@ -1,6 +1,6 @@
 # The Counter-Claim
 
-**v0.1 — 23 August 2026. Implemented in `src/claim.js` and `src/events.js`.**
+**v0.1 — 26 August 2026. Implemented in `src/claim.js` and `src/events.js`.**
 CC BY 4.0, with the rest of the specification.
 
 > *"Identity is about who claims you, and who you claim back."*

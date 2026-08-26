@@ -1,7 +1,7 @@
 /**
  * The counter-claim: the person's half of an identity.
  *
- * Built 23 August 2026 out of the philosophy thread. Olivia: *"identity is about
+ * Built 26 August 2026 out of the philosophy thread. Olivia: *"identity is about
  * who claims you, and who you claim back."* Three things are asserted here.
  *
  * 1. The claim is the person's and only the person can end it.

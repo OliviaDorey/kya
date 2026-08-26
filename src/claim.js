@@ -4,7 +4,7 @@
  *
  * ── Where this came from ───────────────────────────────────────────────────
  *
- * Olivia, 23 August 2026: *"identity is about who claims you, and who you claim
+ * Olivia, 26 August 2026: *"identity is about who claims you, and who you claim
  * back."* Everything else in this library records the first half. The Agent
  * Identity Card says who claims the agent — builder, operator, accountable
  * human. The Delegation Credential says what the person granted and until when.
